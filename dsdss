@@ -11,20 +11,82 @@ local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "WaterClient"
 screenGui.Parent = playerGui
 
--- Frame principale
+-- Frame principale (più grande orizzontalmente e più scuro)
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
-mainFrame.Size = UDim2.new(0.7, 0, 0.85, 0) -- 70% larghezza, 85% altezza
-mainFrame.Position = UDim2.new(0.15, 0, 0.075, 0) -- Centrato
-mainFrame.BackgroundColor3 = Color3.fromRGB(100, 200, 255) -- Azzurro
-mainFrame.BackgroundTransparency = 0.3 -- Trasparente
+mainFrame.Size = UDim2.new(0.75, 0, 0.85, 0) -- 75% larghezza invece di 70%
+mainFrame.Position = UDim2.new(0.125, 0, 0.075, 0) -- Ricentrato
+mainFrame.BackgroundColor3 = Color3.fromRGB(70, 150, 220) -- Azzurro più scuro
+mainFrame.BackgroundTransparency = 0.2 -- Meno trasparente
 mainFrame.BorderSizePixel = 0
 mainFrame.Parent = screenGui
 
 -- Bordi arrotondati
 local corner = Instance.new("UICorner")
-corner.CornerRadius = UDim.new(0, 25) -- Super arrotondati
+corner.CornerRadius = UDim.new(0, 25)
 corner.Parent = mainFrame
+
+-- Frame per i bottoni di navigazione
+local navFrame = Instance.new("Frame")
+navFrame.Name = "NavigationFrame"
+navFrame.Size = UDim2.new(1, 0, 0, 60)
+navFrame.Position = UDim2.new(0, 0, 0, 10)
+navFrame.BackgroundTransparency = 1
+navFrame.Parent = mainFrame
+
+-- Lista dei bottoni
+local buttons = {"Home", "Main", "Misc", "ESP", "Base", "Other"}
+local activeButton = nil
+local indicator = nil
+
+-- Crea i bottoni
+for i, buttonName in ipairs(buttons) do
+    local button = Instance.new("TextButton")
+    button.Name = buttonName .. "Button"
+    button.Size = UDim2.new(1/6, -5, 1, 0)
+    button.Position = UDim2.new((i-1)/6, 2.5, 0, 0)
+    button.BackgroundTransparency = 1
+    button.Text = buttonName
+    button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    button.TextScaled = true
+    button.Font = Enum.Font.GothamBold
+    button.Parent = navFrame
+    
+    -- Indicatore (inizialmente nascosto)
+    if i == 1 then -- Home attivo di default
+        indicator = Instance.new("Frame")
+        indicator.Name = "Indicator"
+        indicator.Size = UDim2.new(0, button.AbsoluteSize.X - 10, 0, 3)
+        indicator.Position = UDim2.new(0, button.AbsolutePosition.X - navFrame.AbsolutePosition.X + 5, 1, -5)
+        indicator.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        indicator.BorderSizePixel = 0
+        indicator.Parent = navFrame
+        
+        local indicatorCorner = Instance.new("UICorner")
+        indicatorCorner.CornerRadius = UDim.new(0, 2)
+        indicatorCorner.Parent = indicator
+        
+        activeButton = button
+    end
+    
+    -- Click evento
+    button.MouseButton1Click:Connect(function()
+        if activeButton ~= button then
+            activeButton = button
+            
+            -- Anima l'indicatore
+            local moveIndicator = TweenService:Create(
+                indicator,
+                TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+                {
+                    Position = UDim2.new(0, button.AbsolutePosition.X - navFrame.AbsolutePosition.X + 5, 1, -5),
+                    Size = UDim2.new(0, button.AbsoluteSize.X - 10, 0, 3)
+                }
+            )
+            moveIndicator:Play()
+        end
+    end)
+end
 
 -- Inizia nascosto per l'animazione
 mainFrame.Size = UDim2.new(0, 0, 0, 0)
@@ -35,8 +97,8 @@ local popUpTween = TweenService:Create(
     mainFrame,
     TweenInfo.new(0.8, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
     {
-        Size = UDim2.new(0.7, 0, 0.85, 0),
-        Position = UDim2.new(0.15, 0, 0.075, 0)
+        Size = UDim2.new(0.75, 0, 0.85, 0),
+        Position = UDim2.new(0.125, 0, 0.075, 0)
     }
 )
 
