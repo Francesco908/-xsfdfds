@@ -1,1 +1,44 @@
+-- Servizi
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Crea lo ScreenGui principale
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "WaterClient"
+screenGui.Parent = playerGui
+
+-- Frame principale
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0.7, 0, 0.85, 0) -- 70% larghezza, 85% altezza
+mainFrame.Position = UDim2.new(0.15, 0, 0.075, 0) -- Centrato
+mainFrame.BackgroundColor3 = Color3.fromRGB(100, 200, 255) -- Azzurro
+mainFrame.BackgroundTransparency = 0.3 -- Trasparente
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+
+-- Bordi arrotondati
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 25) -- Super arrotondati
+corner.Parent = mainFrame
+
+-- Inizia nascosto per l'animazione
+mainFrame.Size = UDim2.new(0, 0, 0, 0)
+mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+
+-- Animazione pop-up fluida
+local popUpTween = TweenService:Create(
+    mainFrame,
+    TweenInfo.new(0.8, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+    {
+        Size = UDim2.new(0.7, 0, 0.85, 0),
+        Position = UDim2.new(0.15, 0, 0.075, 0)
+    }
+)
+
+-- Avvia l'animazione
+popUpTween:Play()
