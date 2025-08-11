@@ -1,14 +1,13 @@
--- Water Hub - Ultimate Edition (Stealth + AntiKick/AntiBan)
+-- Water Hub - Ultimate Edition (Stealth + AntiKick)
 -- TikTok: @znfpro4 | YouTube: OnlyRobloxScript
 
 -- NOTE:
--- - Speed Boost: vecchi metodi (BV veloce) + handshake Coil+Cloak (equip invisibile) + AntiKick/AntiBan (undetected)
+-- - Speed Boost: vecchi metodi (BV veloce) + handshake Coil+Cloak (equip invisibile) + Anti-Kick + GUI stealth
 -- - Start Steal: cammino veloce + floating (no teleport)
--- - Multi Jump (safe): doppio salto con impulsi brevi e cooldown
+-- - Multi Jump (safe): doppio salto a impulsi brevi e cooldown
 -- - ESP Brainrot: SOLO "La Vacca Saturno Saturnita"
 -- - UI: Dark + toggle grigio->verde
--- - Ping spoofer (se hooking disponibile) 55~85ms
--- - Remote Sanitizer e Property Masking (se hooking disponibile)
+-- - Ping spoofer (se disponibile hook metodi) per tenere 55~85 ms su "Data Ping"
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -38,23 +37,30 @@ local THEME = {
     stroke = Color3.fromRGB(70, 70, 70)
 }
 
--- Random utils
+-- Utils random
 math.randomseed(tick()*1e6%1e6)
 local function randstr(n)
     local c = "QWERTYUIOPASDFGHJKLZXCVBNMabcdefghijklmnopqrstuvwxyz0123456789"
     local s = {}
-    for i=1,n do s[i] = string.sub(c, math.random(1,#c), math.random(1,1)) end
+    for i=1,n do
+        local idx = math.random(1,#c)
+        s[i] = string.sub(c, idx, idx)
+    end
     return table.concat(s)
 end
 
 -- Globals
 local multiJumpEnabled = false
 local maxAirJumps = 1
-local airJumpsUsed, lastJumpPulse = 0, 0
+local airJumpsUsed = 0
+local lastJumpPulse = 0
 
 local antiRagdollEnabled = false
-local espEnabled, espTimerEnabled, espBrainrotEnabled = false, false, false
-local godModeEnabled, kingModeEnabled = false, false
+local espEnabled = false
+local espTimerEnabled = false
+local espBrainrotEnabled = false
+local godModeEnabled = false
+local kingModeEnabled = false
 
 local speedBoostEnabled = false
 local speedBoostGui = nil
@@ -73,8 +79,8 @@ local autoCompleteSteal = false
 -- Names stealth
 local GUI_NAME = randstr(10)
 local MAIN_NAME = randstr(10)
-local SPEED_BV_NAME = randstr(9)
-local STEAL_BV_NAME = randstr(8)
+local SPEED_BV_NAME = randstr(10)
+local STEAL_BV_NAME = randstr(10)
 
 -- GUIs
 local ScreenGui, TweenStealGui = nil, nil
@@ -83,155 +89,101 @@ local AntiHitGui, TpInsideGui, KillAuraOptionsGui = nil, nil, nil
 -- Connessioni
 local connections = {}
 
--- Stealth protect GUI
+-- Protect/stealth GUI
 local function protectGui(gui)
-    pcall(function() if syn and syn.protect_gui then syn.protect_gui(gui) end end)
+    pcall(function()
+        if syn and syn.protect_gui then syn.protect_gui(gui) end
+    end)
     local ok, gethuiFn = pcall(function() return gethui end)
     if ok and type(gethuiFn) == "function" then
         gui.Parent = gethuiFn()
     else
-        local succ = pcall(function() gui.Parent = game:GetService("CoreGui") end)
-        if not succ then gui.Parent = PlayerGui end
-    end
-end
-
-----------------------------------------------------------------
--- Anti-Kick/Anti-Ban + Spoof (automatico, se hooking available)
-----------------------------------------------------------------
-local HOOK_OK = (hookmetamethod and newcclosure and getrawmetatable and setreadonly and checkcaller and getnamecallmethod)
-local mt, oldNamecall, oldIndex
-
--- Funzioni utili
-local function isSuspectName(s)
-    s = tostring(s or ""):lower()
-    return s:find("anti") or s:find("ac") or s:find("cheat") or s:find("kick") or s:find("ban") or
-           s:find("log") or s:find("report") or s:find("hb") or s:find("heartbeat") or s:find("speed")
-end
-
-local function sanitizeArgs(args)
-    for i,v in ipairs(args) do
-        if type(v) == "number" then
-            if v > 40 then args[i] = math.random(16, 22) end
-            if v < 0 then args[i] = math.abs(v) end
-        elseif typeof(v) == "Vector3" then
-            local m = v.Magnitude
-            if m > 60 then args[i] = v.Unit * (20 + math.random()*6) end
+        local CoreGui = game:GetService("CoreGui")
+        local succ = pcall(function() gui.Parent = CoreGui end)
+        if not succ then
+            gui.Parent = PlayerGui
         end
     end
-    return args
 end
 
--- AntiKick Ultra (base)
-connections.ak_hb = RunService.Heartbeat:Connect(function()
-    if math.random(1, 12000) == 1 then VirtualUser:ClickButton2(Vector2.new()) end
-end)
-connections.ak_idle = Player.Idled:Connect(function()
-    for i=1,4 do
-        VirtualUser:Button2Down(Vector2.new(0,0), Workspace.CurrentCamera.CFrame) task.wait(0.02)
-        VirtualUser:Button2Up(Vector2.new(0,0), Workspace.CurrentCamera.CFrame) task.wait(0.02)
-    end
-end)
-connections.ak_charrem = Player.CharacterRemoving:Connect(function()
-    task.wait(0.2)
-    if Player.Parent then task.spawn(function() task.wait(0.4) pcall(function() Player:LoadCharacter() end) end) end
-end)
-connections.ak_err = ScriptContext.Error:Connect(function(msg)
-    msg = tostring(msg or ""):lower()
-    if msg:find("kick") or msg:find("ban") or msg:find("exploit") then return true end
-end)
-
--- Ping spoofer + Hook namecall/index
-if HOOK_OK then
-    mt = getrawmetatable(game)
-    setreadonly(mt, false)
-
-    -- __index spoof: WalkSpeed/Velocity safe
-    oldIndex = mt.__index
-    mt.__index = newcclosure(function(self, key)
-        if not checkcaller() then
-            if typeof(self) == "Instance" then
-                local class = self.ClassName
-                if class == "Humanoid" and (key == "WalkSpeed" or key == "JumpPower") then
-                    return key == "WalkSpeed" and 16 or 50
-                end
-                if (class == "BasePart" or class == "Part" or class == "MeshPart") and (key == "Velocity" or key == "AssemblyLinearVelocity") then
-                    local ok, v = pcall(function() return oldIndex(self, key) end)
-                    if ok and typeof(v) == "Vector3" then
-                        local m = v.Magnitude
-                        if m > 28 then
-                            return v.Unit * 22
-                        end
-                        return v
-                    end
-                    return Vector3.new()
-                end
-                if tostring(self) == "Data Ping" and key == "Value" then
-                    return math.random(55,85)
-                end
+-- Anti-Kick Ultra + Hook (se exploit supporta)
+local function initAntiKick()
+    -- Micro input random
+    connections.ak_hb = RunService.Heartbeat:Connect(function()
+        if math.random(1, 12000) == 1 then VirtualUser:ClickButton2(Vector2.new()) end
+    end)
+    -- Anti idle
+    connections.ak_idle = Player.Idled:Connect(function()
+        for i=1,4 do
+            VirtualUser:Button2Down(Vector2.new(0,0), Workspace.CurrentCamera.CFrame) task.wait(0.02)
+            VirtualUser:Button2Up(Vector2.new(0,0), Workspace.CurrentCamera.CFrame) task.wait(0.02)
+        end
+    end)
+    -- Reload soft
+    connections.ak_charrem = Player.CharacterRemoving:Connect(function()
+        task.wait(0.2)
+        if Player.Parent then task.spawn(function() task.wait(0.4) pcall(function() Player:LoadCharacter() end) end) end
+    end)
+    -- Filtra errori "kick/ban/exploit"
+    connections.ak_err = ScriptContext.Error:Connect(function(msg)
+        msg = tostring(msg or ""):lower()
+        if msg:find("kick") or msg:find("ban") or msg:find("exploit") then
+            return true
+        end
+    end)
+    -- Hook Kick/Namecall (se available)
+    local ok_hook = (hookmetamethod and newcclosure and getrawmetatable and setreadonly and checkcaller and getnamecallmethod)
+    if ok_hook then
+        local oldnamecall
+        oldnamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+            local m = getnamecallmethod()
+            if not checkcaller() and m == "Kick" and tostring(self) == tostring(Player) then
+                return nil
             end
+            return oldnamecall(self, ...)
+        end))
+    end
+end
+initAntiKick()
+
+-- Ping spoofer (solo client-side; se available hooking)
+local function initPingSpoofer()
+    local ok = (hookmetamethod and newcclosure and getrawmetatable and setreadonly and checkcaller)
+    if not ok then return end
+    local mt = getrawmetatable(game)
+    setreadonly(mt,false)
+    local oldIndex = mt.__index
+    mt.__index = newcclosure(function(self, key)
+        if not checkcaller() and tostring(self) == "Data Ping" and key == "Value" then
+            return math.random(55,85)
         end
         return oldIndex(self, key)
     end)
-
-    -- __namecall hook: Kick + Remote sanitize
-    oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-        local method = getnamecallmethod()
-        local args = {...}
-
-        -- Blocca Kick lato client
-        if not checkcaller() and method == "Kick" and tostring(self) == tostring(Player) then
-            return nil
-        end
-
-        -- Sanitize remoti sospetti
-        if not checkcaller() and (method == "FireServer" or method == "InvokeServer") then
-            local nm = (self and self.Name) or ""
-            local path = nm
-            local p = self.Parent
-            while p and p ~= game do
-                path = tostring(p.Name) .. "/" .. path
-                p = p.Parent
-            end
-            if isSuspectName(nm) or isSuspectName(path) then
-                args = sanitizeArgs(args)
-                return oldNamecall(self, table.unpack(args))
-            end
-        end
-
-        return oldNamecall(self, ...)
-    end))
-
-    setreadonly(mt, true)
+    setreadonly(mt,true)
 end
+initPingSpoofer()
 
-----------------------------------------------------------------
 -- Notifica
-----------------------------------------------------------------
 local function showNotification(text, color)
     local notification = Instance.new("ScreenGui")
     notification.Name = randstr(8)
     notification.Parent = PlayerGui
-
     local frame = Instance.new("Frame", notification)
     frame.Size = UDim2.new(0, 300, 0, 50)
     frame.Position = UDim2.new(0.5, -150, 0.1, 0)
     frame.BackgroundColor3 = color
     Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
-
     local label = Instance.new("TextLabel", frame)
-    label.Size = UDim2.new(1, 0, 1, 0)
+    label.Size = UDim2.new(1,0,1,0)
     label.BackgroundTransparency = 1
     label.Text = text
     label.TextColor3 = THEME.text
     label.TextScaled = true
     label.Font = Enum.Font.GothamBold
-
     Debris:AddItem(notification, 2)
 end
 
-----------------------------------------------------------------
 -- GUI principale (stealth)
-----------------------------------------------------------------
 ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = GUI_NAME
 ScreenGui.ResetOnSpawn = false
@@ -245,7 +197,7 @@ MainFrame.Position = UDim2.new(0.5, -125, 0.5, -150)
 MainFrame.Size = UDim2.new(0, 250, 0, 320)
 MainFrame.Active = true
 MainFrame.Draggable = true
-Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 8)
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0,8)
 
 -- Bordo animato
 local waveConnection do
@@ -264,13 +216,13 @@ end
 -- Header
 local Header = Instance.new("Frame", MainFrame)
 Header.BackgroundColor3 = THEME.header
-Header.Size = UDim2.new(1, 0, 0, 30)
-Instance.new("UICorner", Header).CornerRadius = UDim.new(0, 8)
+Header.Size = UDim2.new(1,0,0,30)
+Instance.new("UICorner", Header).CornerRadius = UDim.new(0,8)
 
 local Title = Instance.new("TextLabel", Header)
 Title.BackgroundTransparency = 1
-Title.Position = UDim2.new(0, 8, 0, 0)
-Title.Size = UDim2.new(1, -60, 1, 0)
+Title.Position = UDim2.new(0,8,0,0)
+Title.Size = UDim2.new(1,-60,1,0)
 Title.Font = Enum.Font.GothamBold
 Title.Text = "Water Hub"
 Title.TextColor3 = THEME.accent
@@ -279,38 +231,38 @@ Title.TextXAlignment = Enum.TextXAlignment.Left
 
 local MinimizeButton = Instance.new("TextButton", Header)
 MinimizeButton.BackgroundColor3 = THEME.warn
-MinimizeButton.Position = UDim2.new(1, -50, 0.5, -7)
-MinimizeButton.Size = UDim2.new(0, 14, 0, 14)
+MinimizeButton.Position = UDim2.new(1,-50,0.5,-7)
+MinimizeButton.Size = UDim2.new(0,14,0,14)
 MinimizeButton.Font = Enum.Font.GothamBold
 MinimizeButton.Text = "-"
-MinimizeButton.TextColor3 = Color3.fromRGB(0, 0, 0)
+MinimizeButton.TextColor3 = Color3.fromRGB(0,0,0)
 MinimizeButton.TextScaled = true
-Instance.new("UICorner", MinimizeButton).CornerRadius = UDim.new(0, 3)
+Instance.new("UICorner", MinimizeButton).CornerRadius = UDim.new(0,3)
 
 local CloseButton = Instance.new("TextButton", Header)
 CloseButton.BackgroundColor3 = THEME.danger
-CloseButton.Position = UDim2.new(1, -30, 0.5, -7)
-CloseButton.Size = UDim2.new(0, 14, 0, 14)
+CloseButton.Position = UDim2.new(1,-30,0.5,-7)
+CloseButton.Size = UDim2.new(0,14,0,14)
 CloseButton.Font = Enum.Font.GothamBold
 CloseButton.Text = "X"
 CloseButton.TextColor3 = THEME.text
 CloseButton.TextScaled = true
-Instance.new("UICorner", CloseButton).CornerRadius = UDim.new(0, 3)
+Instance.new("UICorner", CloseButton).CornerRadius = UDim.new(0,3)
 
 -- Tabs
 local TabContainer = Instance.new("Frame", MainFrame)
 TabContainer.BackgroundTransparency = 1
-TabContainer.Position = UDim2.new(0, 0, 0, 30)
-TabContainer.Size = UDim2.new(1, 0, 0, 30)
+TabContainer.Position = UDim2.new(0,0,0,30)
+TabContainer.Size = UDim2.new(1,0,0,30)
 
 local CreditFrame = Instance.new("Frame", MainFrame)
 CreditFrame.BackgroundColor3 = THEME.header
-CreditFrame.Position = UDim2.new(0, 0, 1, -20)
-CreditFrame.Size = UDim2.new(1, 0, 0, 20)
-Instance.new("UICorner", CreditFrame).CornerRadius = UDim.new(0, 8)
+CreditFrame.Position = UDim2.new(0,0,1,-20)
+CreditFrame.Size = UDim2.new(1,0,0,20)
+Instance.new("UICorner", CreditFrame).CornerRadius = UDim.new(0,8)
 local CreditLabel = Instance.new("TextLabel", CreditFrame)
 CreditLabel.BackgroundTransparency = 1
-CreditLabel.Size = UDim2.new(1, 0, 1, 0)
+CreditLabel.Size = UDim2.new(1,0,1,0)
 CreditLabel.Font = Enum.Font.Gotham
 CreditLabel.Text = "TikTok: @znfpro4 | YT: OnlyRobloxScript"
 CreditLabel.TextColor3 = THEME.subtext
@@ -322,7 +274,7 @@ local tabButtons, tabFrames = {}, {}
 for i, tabName in ipairs(tabs) do
     local TabButton = Instance.new("TextButton", TabContainer)
     TabButton.Name = tabName .. "Tab"
-    TabButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    TabButton.BackgroundColor3 = Color3.fromRGB(45,45,45)
     TabButton.BorderSizePixel = 0
     TabButton.Position = UDim2.new((i-1)/#tabs, 1, 0, 3)
     TabButton.Size = UDim2.new(1/#tabs, -2, 1, -6)
@@ -330,35 +282,35 @@ for i, tabName in ipairs(tabs) do
     TabButton.Text = tabName
     TabButton.TextColor3 = THEME.text
     TabButton.TextScaled = true
-    Instance.new("UICorner", TabButton).CornerRadius = UDim.new(0, 4)
+    Instance.new("UICorner", TabButton).CornerRadius = UDim.new(0,4)
     tabButtons[tabName] = TabButton
 
     local TabFrame = Instance.new("ScrollingFrame", MainFrame)
     TabFrame.Name = tabName .. "Frame"
     TabFrame.BackgroundTransparency = 1
-    TabFrame.Position = UDim2.new(0, 8, 0, 68)
-    TabFrame.Size = UDim2.new(1, -16, 1, -96)
+    TabFrame.Position = UDim2.new(0,8,0,68)
+    TabFrame.Size = UDim2.new(1,-16,1,-96)
     TabFrame.ScrollBarThickness = 3
-    TabFrame.ScrollBarImageColor3 = Color3.fromRGB(90, 90, 90)
-    TabFrame.CanvasSize = UDim2.new(0, 0, 0, 800)
+    TabFrame.ScrollBarImageColor3 = Color3.fromRGB(90,90,90)
+    TabFrame.CanvasSize = UDim2.new(0,0,0,800)
     TabFrame.Visible = (i == 1)
     local TabLayout = Instance.new("UIListLayout", TabFrame)
-    TabLayout.Padding = UDim.new(0, 4)
+    TabLayout.Padding = UDim.new(0,4)
     TabLayout.SortOrder = Enum.SortOrder.LayoutOrder
     tabFrames[tabName] = TabFrame
 end
 
 local function createLabel(parent, text, order, color)
     local Label = Instance.new("TextLabel", parent)
-    Label.BackgroundColor3 = color or Color3.fromRGB(36, 36, 36)
+    Label.BackgroundColor3 = color or Color3.fromRGB(36,36,36)
     Label.BorderSizePixel = 0
-    Label.Size = UDim2.new(1, 0, 0, 25)
+    Label.Size = UDim2.new(1,0,0,25)
     Label.Font = Enum.Font.GothamBold
     Label.Text = text
     Label.TextColor3 = THEME.text
     Label.TextScaled = true
     Label.LayoutOrder = order or 0
-    Instance.new("UICorner", Label).CornerRadius = UDim.new(0, 4)
+    Instance.new("UICorner", Label).CornerRadius = UDim.new(0,4)
     return Label
 end
 
@@ -366,16 +318,16 @@ local function createButton(parent, text, callback, hasToggle, order)
     local Button = Instance.new("TextButton", parent)
     Button.BackgroundColor3 = THEME.btnOff
     Button.BorderSizePixel = 0
-    Button.Size = UDim2.new(1, 0, 0, 28)
+    Button.Size = UDim2.new(1,0,0,28)
     Button.Font = Enum.Font.Gotham
     Button.Text = text
     Button.TextColor3 = THEME.text
     Button.TextScaled = true
     Button.TextXAlignment = Enum.TextXAlignment.Left
     Button.LayoutOrder = order or 0
-    Instance.new("UICorner", Button).CornerRadius = UDim.new(0, 4)
+    Instance.new("UICorner", Button).CornerRadius = UDim.new(0,4)
     local ButtonPadding = Instance.new("UIPadding", Button)
-    ButtonPadding.PaddingLeft = UDim.new(0, 8)
+    ButtonPadding.PaddingLeft = UDim.new(0,8)
 
     local isEnabled = false
     if hasToggle then
@@ -383,9 +335,9 @@ local function createButton(parent, text, callback, hasToggle, order)
         ToggleIndicator.Name = "ToggleIndicator"
         ToggleIndicator.BackgroundColor3 = THEME.danger
         ToggleIndicator.BorderSizePixel = 0
-        ToggleIndicator.Position = UDim2.new(1, -18, 0.5, -6)
-        ToggleIndicator.Size = UDim2.new(0, 12, 0, 12)
-        Instance.new("UICorner", ToggleIndicator).CornerRadius = UDim.new(0, 6)
+        ToggleIndicator.Position = UDim2.new(1,-18,0.5,-6)
+        ToggleIndicator.Size = UDim2.new(0,12,0,12)
+        Instance.new("UICorner", ToggleIndicator).CornerRadius = UDim.new(0,6)
 
         Button.MouseButton1Click:Connect(function()
             isEnabled = not isEnabled
@@ -401,27 +353,27 @@ end
 
 local function createCheckbox(parent, text, callback, order)
     local CheckFrame = Instance.new("Frame", parent)
-    CheckFrame.BackgroundColor3 = Color3.fromRGB(36, 36, 36)
+    CheckFrame.BackgroundColor3 = Color3.fromRGB(36,36,36)
     CheckFrame.BorderSizePixel = 0
-    CheckFrame.Size = UDim2.new(1, 0, 0, 25)
+    CheckFrame.Size = UDim2.new(1,0,0,25)
     CheckFrame.LayoutOrder = order or 0
-    Instance.new("UICorner", CheckFrame).CornerRadius = UDim.new(0, 4)
+    Instance.new("UICorner", CheckFrame).CornerRadius = UDim.new(0,4)
 
     local CheckButton = Instance.new("TextButton", CheckFrame)
     CheckButton.BackgroundColor3 = THEME.danger
     CheckButton.BorderSizePixel = 0
-    CheckButton.Position = UDim2.new(0, 5, 0.5, -8)
-    CheckButton.Size = UDim2.new(0, 16, 0, 16)
+    CheckButton.Position = UDim2.new(0,5,0.5,-8)
+    CheckButton.Size = UDim2.new(0,16,0,16)
     CheckButton.Font = Enum.Font.GothamBold
     CheckButton.Text = ""
     CheckButton.TextColor3 = THEME.text
     CheckButton.TextScaled = true
-    Instance.new("UICorner", CheckButton).CornerRadius = UDim.new(0, 3)
+    Instance.new("UICorner", CheckButton).CornerRadius = UDim.new(0,3)
 
     local CheckLabel = Instance.new("TextLabel", CheckFrame)
     CheckLabel.BackgroundTransparency = 1
-    CheckLabel.Position = UDim2.new(0, 25, 0, 0)
-    CheckLabel.Size = UDim2.new(1, -25, 1, 0)
+    CheckLabel.Position = UDim2.new(0,25,0,0)
+    CheckLabel.Size = UDim2.new(1,-25,1,0)
     CheckLabel.Font = Enum.Font.Gotham
     CheckLabel.Text = text
     CheckLabel.TextColor3 = THEME.text
@@ -484,6 +436,7 @@ createButton(tabFrames["Main"], "Multi Jump (safe)", function(enabled)
                 airJumpsUsed = 0
                 return
             end
+
             if airJumpsUsed >= maxAirJumps then return end
             if tick() - lastJumpPulse < 0.2 then return end
             lastJumpPulse = tick()
@@ -491,13 +444,16 @@ createButton(tabFrames["Main"], "Multi Jump (safe)", function(enabled)
 
             local att = root:FindFirstChild("MJ_Att") or Instance.new("Attachment")
             att.Name = "MJ_Att"; att.Parent = root
+
             local vf = Instance.new("VectorForce")
             vf.Attachment0 = att
-            vf.Force = Vector3.new(0, (hum:GetMass() or 70)*70, 0)
+            vf.Force = Vector3.new(0, (hum:GetMass() or 70) * 70, 0)
             vf.ApplyAtCenterOfMass = true
             vf.Relativity = Enum.ForceRelativity.World
             vf.Parent = root
+
             hum:ChangeState(Enum.HumanoidStateType.Jumping)
+
             task.delay(0.12, function() if vf then vf:Destroy() end end)
         end)
         showNotification("Multi Jump ON", THEME.btnOn)
@@ -508,7 +464,8 @@ end, true, 2)
 
 createButton(tabFrames["Main"], "Anti Ragdoll", function(enabled)
     antiRagdollEnabled = enabled
-    showNotification(enabled and "Anti-Ragdoll Enabled" or "Anti-Ragdoll Disabled", enabled and THEME.btnOn or THEME.danger)
+    showNotification(enabled and "Anti-Ragdoll Enabled" or "Anti-Ragdoll Disabled",
+        enabled and THEME.btnOn or THEME.danger)
 end, true, 3)
 
 createLabel(tabFrames["Main"], "Player", 4, Color3.fromRGB(60, 60, 60))
@@ -518,7 +475,7 @@ local function createTpInsideGui()
     if TpInsideGui then return end
 
     TpInsideGui = Instance.new("Frame", ScreenGui)
-    TpInsideGui.Name = randstr(9)
+    TpInsideGui.Name = randstr(8)
     TpInsideGui.BackgroundColor3 = THEME.panel
     TpInsideGui.BorderSizePixel = 0
     TpInsideGui.Position = UDim2.new(0.5, -75, 0.3, -40)
@@ -621,7 +578,7 @@ local function createAntiHitGui()
     if AntiHitGui then return end
 
     AntiHitGui = Instance.new("Frame", ScreenGui)
-    AntiHitGui.Name = randstr(9)
+    AntiHitGui.Name = randstr(8)
     AntiHitGui.BackgroundColor3 = THEME.panel
     AntiHitGui.BorderSizePixel = 0
     AntiHitGui.Position = UDim2.new(0.5, -75, 0.7, -40)
@@ -721,7 +678,7 @@ end, false, 6)
 createLabel(tabFrames["Main"], "Other", 7, Color3.fromRGB(60, 60, 60))
 
 ----------------------------------------------------------------
--- SPEED BOOST (vecchi metodi BV + ghost tools + AntiKick)
+-- SPEED BOOST (vecchi metodi + AntiKick + GUI stealth)
 ----------------------------------------------------------------
 local COIL_NAMES = {"Speed Coil","SpeedCoil","Speed Coil Tool","Coil"}
 local CLOAK_NAMES = {"Invisibility Cloak","Cloak","Invisibility","InvisibilityCloak"}
@@ -731,7 +688,7 @@ local function isCloakName(n)
     return n:find("cloak") or n:find("invis")
 end
 
-local function simulateTap(duration)
+local function simulateScreenClick(duration)
     local cam = Workspace.CurrentCamera
     local vps = cam.ViewportSize
     local pos = Vector2.new(vps.X/2, vps.Y/2)
@@ -740,29 +697,29 @@ local function simulateTap(duration)
     VirtualUser:Button1Up(pos, cam.CFrame)
 end
 
-local function findToolByNames(container, list)
-    for _, nm in ipairs(list) do
+local function findToolByNames(container, names)
+    for _, nm in ipairs(names) do
         local t = container:FindFirstChild(nm)
         if t and t:IsA("Tool") then return t end
     end
 end
 
 local function getCoil()
-    local c = Player.Character
-    if c then
-        local t = findToolByNames(c, COIL_NAMES); if t then return t end
+    local char = Player.Character
+    if char then
+        local t = findToolByNames(char, COIL_NAMES); if t then return t end
     end
-    local b = Player:FindFirstChild("Backpack")
-    if b then return findToolByNames(b, COIL_NAMES) end
+    local bp = Player:FindFirstChild("Backpack")
+    if bp then return findToolByNames(bp, COIL_NAMES) end
 end
 
 local function getCloak()
-    local c = Player.Character
-    if c then
-        local t = findToolByNames(c, CLOAK_NAMES); if t then return t end
+    local char = Player.Character
+    if char then
+        local t = findToolByNames(char, CLOAK_NAMES); if t then return t end
     end
-    local b = Player:FindFirstChild("Backpack")
-    if b then return findToolByNames(b, CLOAK_NAMES) end
+    local bp = Player:FindFirstChild("Backpack")
+    if bp then return findToolByNames(bp, CLOAK_NAMES) end
 end
 
 local function ghostTool(tool)
@@ -782,32 +739,36 @@ local function ghostTool(tool)
 end
 
 local function ensureEquip(tool)
-    local c = Player.Character
-    local h = c and c:FindFirstChild("Humanoid")
-    if h and tool and tool.Parent ~= c then pcall(function() h:EquipTool(tool) end) end
+    local char = Player.Character
+    local hum = char and char:FindFirstChild("Humanoid")
+    if hum and tool and tool.Parent ~= char then pcall(function() hum:EquipTool(tool) end) end
 end
 
--- Equip 1 volta ghost coil+cloak e tap cloak 1 volta
-local function handshakeGhostTools()
-    local h = Player.Character and Player.Character:FindFirstChild("Humanoid")
-    if not h then return end
+-- Equip una volta Coil + Cloak (ghost) e tap cloack 1 volta
+local function handshakeGhostCoilCloak()
+    local ch = Player.Character
+    local hum = ch and ch:FindFirstChild("Humanoid")
+    if not hum then return end
     local coil = getCoil()
     local cloak = getCloak()
-    if coil then pcall(function() h:EquipTool(coil) end) end
+
+    if coil then pcall(function() hum:EquipTool(coil) end) end
     task.wait(0.06)
     if cloak then
-        pcall(function() h:EquipTool(cloak) end)
-        task.delay(0.05, function() simulateTap(0.16) end)
+        pcall(function() hum:EquipTool(cloak) end)
+        task.delay(0.05, function() simulateScreenClick(0.16) end)
     end
     task.delay(0.2, function()
-        pcall(function() h:UnequipTools() end)
+        pcall(function() hum:UnequipTools() end)
         if coil and coil.Parent then ghostTool(coil) end
         if cloak and cloak.Parent then ghostTool(cloak) end
     end)
 end
 
+-- Speed Boost GUI + logica (BV veloce + AntiKick)
 local function createSpeedBoostGui()
     if speedBoostGui then return end
+
     speedBoostGui = Instance.new("Frame", ScreenGui)
     speedBoostGui.Name = randstr(9)
     speedBoostGui.BackgroundColor3 = THEME.panel
@@ -859,15 +820,15 @@ local function createSpeedBoostGui()
     status.Position = UDim2.new(0,10,0,65)
     status.Size = UDim2.new(1,-20,0,20)
     status.Font = Enum.Font.Gotham
-    status.Text = "BV Fast + Ghost Tools + AntiKick"
+    status.Text = "BV Fast + Coil/Cloak ghost"
     status.TextColor3 = THEME.subtext
     status.TextScaled = true
 
-    -- parametri BV
+    -- BV engine (vecchio metodo)
     local currentSpeed = 0
-    local targetFast = 84
-    local accel = 0.45
-    local lastHandshake, periodicHandshake = 0, 0
+    local targetFast = 84   -- velocissimo
+    local accel = 0.45      -- ramp-up
+    local lastHandshake = 0
 
     local function ensureMotor(root)
         local bv = root:FindFirstChild(SPEED_BV_NAME)
@@ -879,20 +840,23 @@ local function createSpeedBoostGui()
         end
         return bv
     end
+
     local function removeMotor(root)
         local bv = root and root:FindFirstChild(SPEED_BV_NAME)
         if bv then bv:Destroy() end
     end
 
     local function enableSpeedBoost()
-        handshakeGhostTools()
+        -- handshake iniziale (equip ghost coil+cloak + tap 1 volta cloak)
+        handshakeGhostCoilCloak()
+
         connections.speedBoost = RunService.Heartbeat:Connect(function()
             local ch = Player.Character
             local hum = ch and ch:FindFirstChild("Humanoid")
             local root = ch and ch:FindFirstChild("HumanoidRootPart")
             if not hum or not root then return end
-            local dir = hum.MoveDirection
 
+            local dir = hum.MoveDirection
             if dir.Magnitude > 0 then
                 currentSpeed = currentSpeed + (targetFast - currentSpeed) * accel
                 local bv = ensureMotor(root)
@@ -900,20 +864,14 @@ local function createSpeedBoostGui()
                 local jitterZ = (math.random()-0.5)*1.4
                 bv.Velocity = dir.Unit * currentSpeed + Vector3.new(jitterX, 0, jitterZ)
 
-                -- micro-lift
+                -- leggero lift anti-attrito (più stealth)
                 if math.random() < 0.06 then root.CFrame = root.CFrame + Vector3.new(0, 0.05, 0) end
 
-                -- recovery se viene tagliata
+                -- se senti rollback forte, rifai handshake (cooldown)
                 local planar = Vector3.new(root.AssemblyLinearVelocity.X, 0, root.AssemblyLinearVelocity.Z).Magnitude
-                if planar < (targetFast*0.38) and (tick()-lastHandshake) > 1.6 then
+                if planar < (targetFast*0.38) and (tick() - lastHandshake) > 1.6 then
                     lastHandshake = tick()
-                    handshakeGhostTools()
-                end
-
-                -- handshake periodico (12~20s)
-                if (tick() - periodicHandshake) > (12 + math.random()*8) then
-                    periodicHandshake = tick()
-                    handshakeGhostTools()
+                    handshakeGhostCoilCloak()
                 end
             else
                 removeMotor(root)
@@ -936,11 +894,12 @@ local function createSpeedBoostGui()
         toggleSB.BackgroundColor3 = speedBoostEnabled and THEME.btnOn or THEME.danger
         if speedBoostEnabled then
             enableSpeedBoost()
+            -- se cloak già in mano -> un tap singolo
             local ch = Player.Character
             if ch then
                 for _, t in ipairs(ch:GetChildren()) do
                     if t:IsA("Tool") and isCloakName(t.Name) then
-                        task.delay(0.05, function() simulateTap(0.16) end)
+                        task.delay(0.05, function() simulateScreenClick(0.16) end)
                         break
                     end
                 end
@@ -967,7 +926,7 @@ local function createTweenStealGui()
     if TweenStealGui then return end
 
     TweenStealGui = Instance.new("Frame", ScreenGui)
-    TweenStealGui.Name = randstr(9)
+    TweenStealGui.Name = randstr(8)
     TweenStealGui.BackgroundColor3 = THEME.panel
     TweenStealGui.BorderSizePixel = 0
     TweenStealGui.Position = UDim2.new(0.5, -85, 0.5, -90)
@@ -1012,7 +971,7 @@ local function createTweenStealGui()
     setPosBtn.Text = "Set Position"
     setPosBtn.TextColor3 = THEME.text
     setPosBtn.TextScaled = true
-    Instance.new("UICorner", setPosBtn).CornerRadius = UDim.new(0, 6)
+    Instance.new("UICorner", setPosBtn).CornerRadius = UDim2.new(0, 6)
 
     local startBtn = Instance.new("TextButton", TweenStealGui)
     startBtn.BackgroundColor3 = THEME.btnOff
@@ -1045,7 +1004,7 @@ local function createTweenStealGui()
     acToggle.Text = ""
     acToggle.TextColor3 = THEME.text
     acToggle.TextScaled = true
-    Instance.new("UICorner", acToggle).CornerRadius = UDim.new(0,3)
+    Instance.new("UICorner", acToggle).CornerRadius = UDim2.new(0,3)
     local acLabel = Instance.new("TextLabel", acFrame)
     acLabel.BackgroundTransparency = 1
     acLabel.Position = UDim2.new(0, 25, 0, 0)
@@ -1221,13 +1180,15 @@ createButton(tabFrames["Visual"], "ESP Brainrot (Saturno)", function(enabled)
     if enabled then
         local function apply()
             for _, o in pairs(Workspace:GetDescendants()) do
-                if o.Name == TARGET and not o:FindFirstChild("SaturnoESP") then
-                    local h = Instance.new("Highlight", o)
-                    h.Name = "SaturnoESP"
-                    h.FillColor = Color3.fromRGB(255, 215, 0)
-                    h.OutlineColor = Color3.fromRGB(0, 0, 0)
-                    h.FillTransparency = 0.25
-                    h.OutlineTransparency = 0
+                if o.Name == TARGET then
+                    if not o:FindFirstChild("SaturnoESP") then
+                        local h = Instance.new("Highlight", o)
+                        h.Name = "SaturnoESP"
+                        h.FillColor = Color3.fromRGB(255, 215, 0)
+                        h.OutlineColor = Color3.fromRGB(0, 0, 0)
+                        h.FillTransparency = 0.25
+                        h.OutlineTransparency = 0
+                    end
                 end
             end
         end
@@ -1250,6 +1211,7 @@ createButton(tabFrames["Misc"], "God Mode", function(enabled)
     godModeEnabled = enabled
     local char = Player.Character
     local hum = char and char:FindFirstChild("Humanoid")
+
     if enabled and hum then
         hum.MaxHealth = math.huge
         hum.Health = math.huge
@@ -1329,7 +1291,7 @@ local function createKillAuraOptionsGui()
     if KillAuraOptionsGui then return end
 
     KillAuraOptionsGui = Instance.new("Frame", ScreenGui)
-    KillAuraOptionsGui.Name = randstr(7)
+    KillAuraOptionsGui.Name = randstr(8)
     KillAuraOptionsGui.BackgroundColor3 = THEME.panel
     KillAuraOptionsGui.BorderSizePixel = 0
     KillAuraOptionsGui.Position = UDim2.new(0.5, -75, 0.4, -60)
@@ -1364,25 +1326,29 @@ local function createKillAuraOptionsGui()
     CheckboxLayout.Padding = UDim.new(0, 5)
     CheckboxLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
-    createCheckbox(CheckboxContainer, "360 Kill Aura", function(v) killAura360Enabled = v end, 1)
-    createCheckbox(CheckboxContainer, "Multi Kill Aura", function(v) multiKillAuraEnabled = v end, 2)
-    createCheckbox(CheckboxContainer, "King Kill Aura", function(v) kingKillAuraEnabled = v end, 3)
+    createCheckbox(CheckboxContainer, "360 Kill Aura", function(enabled) killAura360Enabled = enabled end, 1)
+    createCheckbox(CheckboxContainer, "Multi Kill Aura", function(enabled) multiKillAuraEnabled = enabled end, 2)
+    createCheckbox(CheckboxContainer, "King Kill Aura", function(enabled) kingKillAuraEnabled = enabled end, 3)
 end
 
 createButton(tabFrames["Misc"], "Kill Aura 360", function(enabled)
     killAuraEnabled = enabled
     if enabled then
-        local tool = Player.Backpack:FindFirstChild("Tung Bat") or (Player.Character and Player.Character:FindFirstChild("Tung Bat"))
-        if not tool then showNotification("Tung Bat not found!", THEME.danger) return end
-        if tool.Parent == Player.Backpack and Player.Character and Player.Character:FindFirstChild("Humanoid") then
-            Player.Character.Humanoid:EquipTool(tool)
+        local tungBat = Player.Backpack:FindFirstChild("Tung Bat") or (Player.Character and Player.Character:FindFirstChild("Tung Bat"))
+        if not tungBat then
+            showNotification("Tung Bat not found!", THEME.danger)
+            return
+        end
+        if tungBat.Parent == Player.Backpack and Player.Character and Player.Character:FindFirstChild("Humanoid") then
+            Player.Character.Humanoid:EquipTool(tungBat)
         end
         createKillAuraOptionsGui()
 
         connections.killAura = RunService.Heartbeat:Connect(function()
-            local t = Player.Character and Player.Character:FindFirstChild("Tung Bat")
+            local tool = Player.Character and Player.Character:FindFirstChild("Tung Bat")
             local rp = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
-            if not t or not rp then return end
+            if not tool or not rp then return end
+
             for _, other in ipairs(Players:GetPlayers()) do
                 if other ~= Player and other.Character and other.Character:FindFirstChild("HumanoidRootPart") then
                     local d = (other.Character.HumanoidRootPart.Position - rp.Position).Magnitude
@@ -1390,15 +1356,18 @@ createButton(tabFrames["Misc"], "Kill Aura 360", function(enabled)
                     if killAura360Enabled then range = 25 end
                     if multiKillAuraEnabled then range = 20 end
                     if kingKillAuraEnabled then range = 50 end
+
                     if d < range then
                         if kingKillAuraEnabled then
-                            local pos = other.Character.HumanoidRootPart.Position + Vector3.new(0,5,0)
+                            local pos = other.Character.HumanoidRootPart.Position + Vector3.new(0, 5, 0)
                             rp.CFrame = CFrame.new(pos, other.Character.HumanoidRootPart.Position)
-                            t:Activate(); task.wait(0.1); t:Activate()
+                            tool:Activate()
+                            task.wait(0.1)
+                            tool:Activate()
                         else
-                            t:Activate()
+                            tool:Activate()
                         end
-                        if multiKillAuraEnabled then for i=1,3 do t:Activate(); task.wait(0.05) end end
+                        if multiKillAuraEnabled then for i=1,3 do tool:Activate(); task.wait(0.05) end end
                     end
                 end
             end
@@ -1407,7 +1376,7 @@ createButton(tabFrames["Misc"], "Kill Aura 360", function(enabled)
         showNotification("Kill Aura 360 Enabled", Color3.fromRGB(255, 0, 0))
     else
         if connections.killAura then connections.killAura:Disconnect() end
-        if KillAuraOptionsGui then KillAuraOptionsGui:Destroy() KillAuraOptionsGui=nil end
+        if KillAuraOptionsGui then KillAuraOptionsGui:Destroy() KillAuraOptionsGui = nil end
         showNotification("Kill Aura 360 Disabled", THEME.danger)
     end
 end, true)
