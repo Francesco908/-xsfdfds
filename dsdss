@@ -1,1500 +1,616 @@
--- Water Hub - Ultimate Edition (Stealth + AntiKick)
--- TikTok: @znfpro4 | YouTube: OnlyRobloxScript
-
--- NOTE:
--- - Speed Boost: vecchi metodi (BV veloce) + handshake Coil+Cloak (equip invisibile) + Anti-Kick + GUI stealth
--- - Start Steal: cammino veloce + floating (no teleport)
--- - Multi Jump (safe): doppio salto a impulsi brevi e cooldown
--- - ESP Brainrot: SOLO "La Vacca Saturno Saturnita"
--- - UI: Dark + toggle grigio->verde
--- - Ping spoofer (se disponibile hook metodi) per tenere 55~85 ms su "Data Ping"
+-- Water Client v3.4 - Admin Panel
+-- LocalScript -> StarterGui
+-- Added switch system and jail functionality
 
 local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
-local TeleportService = game:GetService("TeleportService")
-local ScriptContext = game:GetService("ScriptContext")
-local Debris = game:GetService("Debris")
-local VirtualUser = game:GetService("VirtualUser")
 
-local Player = Players.LocalPlayer
-local PlayerGui = Player:WaitForChild("PlayerGui")
+local player = Players.LocalPlayer
+if not player then Players:GetPropertyChangedSignal("LocalPlayer"):Wait(); player = Players.LocalPlayer end
+local playerGui = player:WaitForChild("PlayerGui")
 
--- THEME
+local ACTIVATION_KEY = "WATER2025"
+
 local THEME = {
-    bg = Color3.fromRGB(18, 18, 18),
-    panel = Color3.fromRGB(28, 28, 28),
-    header = Color3.fromRGB(22, 22, 22),
-    accent = Color3.fromRGB(100, 150, 255),
-    text = Color3.fromRGB(255, 255, 255),
-    subtext = Color3.fromRGB(180, 180, 180),
-    btnOff = Color3.fromRGB(70, 70, 70),
-    btnOn = Color3.fromRGB(40, 167, 69),
-    danger = Color3.fromRGB(220, 53, 69),
-    warn = Color3.fromRGB(255, 193, 7),
-    stroke = Color3.fromRGB(70, 70, 70)
+    panel = Color3.fromRGB(22,22,28),
+    accent = Color3.fromRGB(72,137,255),
+    text = Color3.fromRGB(240,240,245),
+    muted = Color3.fromRGB(170,170,180),
+    dark = Color3.fromRGB(8,8,10),
+    bad = Color3.fromRGB(220,60,60),
+    good = Color3.fromRGB(80,200,120),
+    switch_bg = Color3.fromRGB(45,45,50),
+    switch_on = Color3.fromRGB(80,200,120)
 }
 
--- Utils random
-math.randomseed(tick()*1e6%1e6)
-local function randstr(n)
-    local c = "QWERTYUIOPASDFGHJKLZXCVBNMabcdefghijklmnopqrstuvwxyz0123456789"
-    local s = {}
-    for i=1,n do
-        local idx = math.random(1,#c)
-        s[i] = string.sub(c, idx, idx)
-    end
-    return table.concat(s)
+-- Storage per le prigioni
+local jailedPlayers = {}
+
+local function c(class, props)
+    local obj = Instance.new(class)
+    if props then for k,v in pairs(props) do pcall(function() obj[k] = v end) end end
+    return obj
 end
 
--- Globals
-local multiJumpEnabled = false
-local maxAirJumps = 1
-local airJumpsUsed = 0
-local lastJumpPulse = 0
-
-local antiRagdollEnabled = false
-local espEnabled = false
-local espTimerEnabled = false
-local espBrainrotEnabled = false
-local godModeEnabled = false
-local kingModeEnabled = false
-
-local speedBoostEnabled = false
-local speedBoostGui = nil
-local setPosition = nil
-local testV1Active = false
-
-local tpInsideEnabled = false
-local antiHitEnabled = false
-local killAuraEnabled = false
-local killAura360Enabled = false
-local multiKillAuraEnabled = false
-local kingKillAuraEnabled = false
-
-local autoCompleteSteal = false
-
--- Names stealth
-local GUI_NAME = randstr(10)
-local MAIN_NAME = randstr(10)
-local SPEED_BV_NAME = randstr(10)
-local STEAL_BV_NAME = randstr(10)
-
--- GUIs
-local ScreenGui, TweenStealGui = nil, nil
-local AntiHitGui, TpInsideGui, KillAuraOptionsGui = nil, nil, nil
-
--- Connessioni
-local connections = {}
-
--- Protect/stealth GUI
-local function protectGui(gui)
-    pcall(function()
-        if syn and syn.protect_gui then syn.protect_gui(gui) end
-    end)
-    local ok, gethuiFn = pcall(function() return gethui end)
-    if ok and type(gethuiFn) == "function" then
-        gui.Parent = gethuiFn()
-    else
-        local CoreGui = game:GetService("CoreGui")
-        local succ = pcall(function() gui.Parent = CoreGui end)
-        if not succ then
-            gui.Parent = PlayerGui
-        end
-    end
+local function safeTween(obj, info, props)
+    if not obj or not obj.Parent then return end
+    local ok, t = pcall(function() return TweenService:Create(obj, info, props) end)
+    if not ok or not t then return end
+    pcall(function() t:Play() end)
+    return t
 end
 
--- Anti-Kick Ultra + Hook (se exploit supporta)
-local function initAntiKick()
-    -- Micro input random
-    connections.ak_hb = RunService.Heartbeat:Connect(function()
-        if math.random(1, 12000) == 1 then VirtualUser:ClickButton2(Vector2.new()) end
-    end)
-    -- Anti idle
-    connections.ak_idle = Player.Idled:Connect(function()
-        for i=1,4 do
-            VirtualUser:Button2Down(Vector2.new(0,0), Workspace.CurrentCamera.CFrame) task.wait(0.02)
-            VirtualUser:Button2Up(Vector2.new(0,0), Workspace.CurrentCamera.CFrame) task.wait(0.02)
-        end
-    end)
-    -- Reload soft
-    connections.ak_charrem = Player.CharacterRemoving:Connect(function()
-        task.wait(0.2)
-        if Player.Parent then task.spawn(function() task.wait(0.4) pcall(function() Player:LoadCharacter() end) end) end
-    end)
-    -- Filtra errori "kick/ban/exploit"
-    connections.ak_err = ScriptContext.Error:Connect(function(msg)
-        msg = tostring(msg or ""):lower()
-        if msg:find("kick") or msg:find("ban") or msg:find("exploit") then
-            return true
-        end
-    end)
-    -- Hook Kick/Namecall (se available)
-    local ok_hook = (hookmetamethod and newcclosure and getrawmetatable and setreadonly and checkcaller and getnamecallmethod)
-    if ok_hook then
-        local oldnamecall
-        oldnamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-            local m = getnamecallmethod()
-            if not checkcaller() and m == "Kick" and tostring(self) == tostring(Player) then
-                return nil
+-- Funzione per creare prigione di ghiaccio
+local function createJail(targetPlayer)
+    if not targetPlayer or not targetPlayer.Character or not targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        return false
+    end
+    
+    local character = targetPlayer.Character
+    local rootPart = character.HumanoidRootPart
+    local position = rootPart.Position
+    
+    -- Rimuovi prigione esistente se presente
+    if jailedPlayers[targetPlayer.UserId] then
+        for _, part in pairs(jailedPlayers[targetPlayer.UserId]) do
+            if part and part.Parent then
+                pcall(function() part:Destroy() end)
             end
-            return oldnamecall(self, ...)
-        end))
-    end
-end
-initAntiKick()
-
--- Ping spoofer (solo client-side; se available hooking)
-local function initPingSpoofer()
-    local ok = (hookmetamethod and newcclosure and getrawmetatable and setreadonly and checkcaller)
-    if not ok then return end
-    local mt = getrawmetatable(game)
-    setreadonly(mt,false)
-    local oldIndex = mt.__index
-    mt.__index = newcclosure(function(self, key)
-        if not checkcaller() and tostring(self) == "Data Ping" and key == "Value" then
-            return math.random(55,85)
         end
-        return oldIndex(self, key)
-    end)
-    setreadonly(mt,true)
+    end
+    
+    local jailParts = {}
+    local jailSize = 8
+    local wallHeight = 12
+    
+    -- Crea le pareti della prigione
+    local wallPositions = {
+        -- Pareti
+        {Vector3.new(position.X + jailSize/2, position.Y + wallHeight/2, position.Z), Vector3.new(1, wallHeight, jailSize)}, -- Destra
+        {Vector3.new(position.X - jailSize/2, position.Y + wallHeight/2, position.Z), Vector3.new(1, wallHeight, jailSize)}, -- Sinistra
+        {Vector3.new(position.X, position.Y + wallHeight/2, position.Z + jailSize/2), Vector3.new(jailSize, wallHeight, 1)}, -- Avanti
+        {Vector3.new(position.X, position.Y + wallHeight/2, position.Z - jailSize/2), Vector3.new(jailSize, wallHeight, 1)}, -- Dietro
+        -- Soffitto
+        {Vector3.new(position.X, position.Y + wallHeight, position.Z), Vector3.new(jailSize, 1, jailSize)}, -- Soffitto
+        -- Pavimento
+        {Vector3.new(position.X, position.Y - 1, position.Z), Vector3.new(jailSize, 1, jailSize)}, -- Pavimento
+    }
+    
+    for i, data in ipairs(wallPositions) do
+        local pos, size = data[1], data[2]
+        local part = c("Part", {
+            Parent = workspace,
+            Size = size,
+            Position = pos,
+            Material = Enum.Material.Ice,
+            BrickColor = BrickColor.new("Pastel blue"),
+            CanCollide = true,
+            Anchored = true,
+            Transparency = 0.3,
+            Name = "JailWall_" .. targetPlayer.Name .. "_" .. i
+        })
+        
+        -- Effetto glow
+        local pointLight = c("PointLight", {
+            Parent = part,
+            Color = Color3.fromRGB(173, 216, 230),
+            Brightness = 0.5,
+            Range = 8
+        })
+        
+        table.insert(jailParts, part)
+    end
+    
+    jailedPlayers[targetPlayer.UserId] = jailParts
+    
+    -- Suono di creazione prigione
+    local sound = c("Sound", {
+        Parent = rootPart,
+        SoundId = "rbxasset://sounds/impact_water.mp3",
+        Volume = 0.5
+    })
+    pcall(function() sound:Play() end)
+    delay(2, function() if sound then sound:Destroy() end end)
+    
+    return true
 end
-initPingSpoofer()
 
--- Notifica
-local function showNotification(text, color)
-    local notification = Instance.new("ScreenGui")
-    notification.Name = randstr(8)
-    notification.Parent = PlayerGui
-    local frame = Instance.new("Frame", notification)
-    frame.Size = UDim2.new(0, 300, 0, 50)
-    frame.Position = UDim2.new(0.5, -150, 0.1, 0)
-    frame.BackgroundColor3 = color
-    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
-    local label = Instance.new("TextLabel", frame)
-    label.Size = UDim2.new(1,0,1,0)
-    label.BackgroundTransparency = 1
-    label.Text = text
-    label.TextColor3 = THEME.text
-    label.TextScaled = true
-    label.Font = Enum.Font.GothamBold
-    Debris:AddItem(notification, 2)
+-- Funzione per rimuovere prigione
+local function removeJail(targetPlayer)
+    if not jailedPlayers[targetPlayer.UserId] then return false end
+    
+    for _, part in pairs(jailedPlayers[targetPlayer.UserId]) do
+        if part and part.Parent then
+            safeTween(part, TweenInfo.new(0.5, Enum.EasingStyle.Quad), {Transparency = 1})
+            delay(0.5, function() pcall(function() part:Destroy() end) end)
+        end
+    end
+    
+    jailedPlayers[targetPlayer.UserId] = nil
+    return true
 end
 
--- GUI principale (stealth)
-ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = GUI_NAME
-ScreenGui.ResetOnSpawn = false
-protectGui(ScreenGui)
-
-local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Name = MAIN_NAME
-MainFrame.BackgroundColor3 = THEME.bg
-MainFrame.BorderSizePixel = 0
-MainFrame.Position = UDim2.new(0.5, -125, 0.5, -150)
-MainFrame.Size = UDim2.new(0, 250, 0, 320)
-MainFrame.Active = true
-MainFrame.Draggable = true
-Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0,8)
-
--- Bordo animato
-local waveConnection do
-    local stroke = Instance.new("UIStroke", MainFrame)
-    stroke.Thickness = 2
-    stroke.Color = THEME.stroke
-    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    waveConnection = RunService.Heartbeat:Connect(function()
-        local t = tick()*1.6
-        local w = math.sin(t)*0.5+0.5
-        stroke.Color = Color3.fromHSV(0.55 + w*0.1, 0.7, 0.8)
-        stroke.Transparency = 0.15 + w*0.15
-    end)
+-- clean previous (if any) to avoid duplicates in Studio hot-reloads
+for _,g in pairs(playerGui:GetChildren()) do
+    if g.Name == "WaterClientGUI" then pcall(function() g:Destroy() end) end
 end
 
--- Header
-local Header = Instance.new("Frame", MainFrame)
-Header.BackgroundColor3 = THEME.header
-Header.Size = UDim2.new(1,0,0,30)
-Instance.new("UICorner", Header).CornerRadius = UDim.new(0,8)
+local screenGui = c("ScreenGui", {Name = "WaterClientGUI", ResetOnSpawn = false, Parent = playerGui})
+screenGui.IgnoreGuiInset = true
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+if syn and syn.protect_gui then pcall(syn.protect_gui, screenGui) end
+c("UIScale", {Parent = screenGui, Scale = 1})
 
-local Title = Instance.new("TextLabel", Header)
-Title.BackgroundTransparency = 1
-Title.Position = UDim2.new(0,8,0,0)
-Title.Size = UDim2.new(1,-60,1,0)
-Title.Font = Enum.Font.GothamBold
-Title.Text = "Water Hub"
-Title.TextColor3 = THEME.accent
-Title.TextScaled = true
-Title.TextXAlignment = Enum.TextXAlignment.Left
+-- ---------- MINIMIZED CIRCLE ----------
+local minimizedCircle = c("Frame", {
+    Name = "MinimizedCircle",
+    Parent = screenGui,
+    Size = UDim2.new(0, 60, 0, 60),
+    Position = UDim2.new(1, -80, 0, 20),
+    BackgroundColor3 = THEME.accent,
+    BorderSizePixel = 0,
+    Visible = false,
+    ZIndex = 100
+})
+c("UICorner", {Parent = minimizedCircle, CornerRadius = UDim.new(1, 0)})
 
-local MinimizeButton = Instance.new("TextButton", Header)
-MinimizeButton.BackgroundColor3 = THEME.warn
-MinimizeButton.Position = UDim2.new(1,-50,0.5,-7)
-MinimizeButton.Size = UDim2.new(0,14,0,14)
-MinimizeButton.Font = Enum.Font.GothamBold
-MinimizeButton.Text = "-"
-MinimizeButton.TextColor3 = Color3.fromRGB(0,0,0)
-MinimizeButton.TextScaled = true
-Instance.new("UICorner", MinimizeButton).CornerRadius = UDim.new(0,3)
+local circleIcon = c("TextLabel", {
+    Parent = minimizedCircle,
+    Text = "W",
+    Font = Enum.Font.GothamBlack,
+    TextSize = 24,
+    TextColor3 = Color3.fromRGB(255, 255, 255),
+    BackgroundTransparency = 1,
+    Size = UDim2.new(1, 0, 1, 0),
+    TextXAlignment = Enum.TextXAlignment.Center,
+    TextYAlignment = Enum.TextYAlignment.Center
+})
 
-local CloseButton = Instance.new("TextButton", Header)
-CloseButton.BackgroundColor3 = THEME.danger
-CloseButton.Position = UDim2.new(1,-30,0.5,-7)
-CloseButton.Size = UDim2.new(0,14,0,14)
-CloseButton.Font = Enum.Font.GothamBold
-CloseButton.Text = "X"
-CloseButton.TextColor3 = THEME.text
-CloseButton.TextScaled = true
-Instance.new("UICorner", CloseButton).CornerRadius = UDim.new(0,3)
+local circleButton = c("TextButton", {
+    Parent = minimizedCircle,
+    Size = UDim2.new(1, 0, 1, 0),
+    BackgroundTransparency = 1,
+    Text = ""
+})
+
+-- ---------- MAIN GUI ----------
+local main = c("Frame", {
+    Name = "Main",
+    Parent = screenGui,
+    AnchorPoint = Vector2.new(0.5,0.5),
+    Position = UDim2.new(0.5,0,0.5,0),
+    Size = UDim2.new(0,460,0,280),
+    BackgroundColor3 = THEME.panel,
+    BorderSizePixel = 0,
+    Visible = false,
+    ClipsDescendants = true
+})
+c("UICorner", {Parent = main, CornerRadius = UDim.new(0,14)})
+
+-- Topbar
+local topBar = c("Frame", {Parent = main, Size = UDim2.new(1,0,0,52), BackgroundTransparency = 1})
+local title = c("TextLabel", {Parent = topBar, Text = "WATER ADMIN", Font = Enum.Font.GothamBold, TextSize = 20, TextColor3 = THEME.text, BackgroundTransparency = 1})
+title.AnchorPoint = Vector2.new(0.5,0.5)
+title.Position = UDim2.new(0.5,0,0.5,0)
+
+local icon = c("Frame", {Parent = topBar, Size = UDim2.new(0,56,0,56), Position = UDim2.new(0,8,0,-2), BackgroundColor3 = THEME.dark})
+c("UICorner", {Parent = icon, CornerRadius = UDim.new(0,10)})
+c("TextLabel", {Parent = icon, Text = "W", Font = Enum.Font.GothamBlack, TextSize = 22, TextColor3 = THEME.accent, BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0)})
+
+-- Close / Minimize
+local closeBtn = c("TextButton", {Parent = topBar, Size = UDim2.new(0,30,0,30), Position = UDim2.new(1,-44,0,11), BackgroundColor3 = Color3.fromRGB(40,40,44), Text = "✕", Font = Enum.Font.Gotham, TextSize = 18, TextColor3 = THEME.text, BorderSizePixel = 0})
+c("UICorner", {Parent = closeBtn, CornerRadius = UDim.new(0,6)})
+local miniBtn = c("TextButton", {Parent = topBar, Size = UDim2.new(0,30,0,30), Position = UDim2.new(1,-88,0,11), BackgroundColor3 = Color3.fromRGB(40,40,44), Text = "—", Font = Enum.Font.Gotham, TextSize = 18, TextColor3 = THEME.muted, BorderSizePixel = 0})
+c("UICorner", {Parent = miniBtn, CornerRadius = UDim.new(0,6)})
 
 -- Tabs
-local TabContainer = Instance.new("Frame", MainFrame)
-TabContainer.BackgroundTransparency = 1
-TabContainer.Position = UDim2.new(0,0,0,30)
-TabContainer.Size = UDim2.new(1,0,0,30)
-
-local CreditFrame = Instance.new("Frame", MainFrame)
-CreditFrame.BackgroundColor3 = THEME.header
-CreditFrame.Position = UDim2.new(0,0,1,-20)
-CreditFrame.Size = UDim2.new(1,0,0,20)
-Instance.new("UICorner", CreditFrame).CornerRadius = UDim.new(0,8)
-local CreditLabel = Instance.new("TextLabel", CreditFrame)
-CreditLabel.BackgroundTransparency = 1
-CreditLabel.Size = UDim2.new(1,0,1,0)
-CreditLabel.Font = Enum.Font.Gotham
-CreditLabel.Text = "TikTok: @znfpro4 | YT: OnlyRobloxScript"
-CreditLabel.TextColor3 = THEME.subtext
-CreditLabel.TextScaled = true
-CreditLabel.TextXAlignment = Enum.TextXAlignment.Center
-
-local tabs = {"Main", "Visual", "Misc", "Server"}
-local tabButtons, tabFrames = {}, {}
-for i, tabName in ipairs(tabs) do
-    local TabButton = Instance.new("TextButton", TabContainer)
-    TabButton.Name = tabName .. "Tab"
-    TabButton.BackgroundColor3 = Color3.fromRGB(45,45,45)
-    TabButton.BorderSizePixel = 0
-    TabButton.Position = UDim2.new((i-1)/#tabs, 1, 0, 3)
-    TabButton.Size = UDim2.new(1/#tabs, -2, 1, -6)
-    TabButton.Font = Enum.Font.Gotham
-    TabButton.Text = tabName
-    TabButton.TextColor3 = THEME.text
-    TabButton.TextScaled = true
-    Instance.new("UICorner", TabButton).CornerRadius = UDim.new(0,4)
-    tabButtons[tabName] = TabButton
-
-    local TabFrame = Instance.new("ScrollingFrame", MainFrame)
-    TabFrame.Name = tabName .. "Frame"
-    TabFrame.BackgroundTransparency = 1
-    TabFrame.Position = UDim2.new(0,8,0,68)
-    TabFrame.Size = UDim2.new(1,-16,1,-96)
-    TabFrame.ScrollBarThickness = 3
-    TabFrame.ScrollBarImageColor3 = Color3.fromRGB(90,90,90)
-    TabFrame.CanvasSize = UDim2.new(0,0,0,800)
-    TabFrame.Visible = (i == 1)
-    local TabLayout = Instance.new("UIListLayout", TabFrame)
-    TabLayout.Padding = UDim.new(0,4)
-    TabLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    tabFrames[tabName] = TabFrame
+local tabsFrame = c("Frame", {Parent = main, Position = UDim2.new(0,16,0,70), Size = UDim2.new(0,130,0,190), BackgroundTransparency = 1})
+c("UIListLayout", {Parent = tabsFrame, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0,10)})
+c("UIPadding", {Parent = tabsFrame, PaddingTop = UDim2.new(0,4), PaddingLeft = UDim2.new(0,4)})
+local tabNames = {"Main","ESP","Misc","Other"}
+local tabButtons = {}
+for i,name in ipairs(tabNames) do
+    local b = c("TextButton", {Parent = tabsFrame, Size = UDim2.new(1,-8,0,40), BackgroundColor3 = Color3.fromRGB(30,30,36), Text = name, Font = Enum.Font.Gotham, TextSize = 15, TextColor3 = THEME.muted, BorderSizePixel = 0})
+    c("UICorner", {Parent = b, CornerRadius = UDim.new(0,8)})
+    b.LayoutOrder = i
+    tabButtons[name] = b
 end
 
-local function createLabel(parent, text, order, color)
-    local Label = Instance.new("TextLabel", parent)
-    Label.BackgroundColor3 = color or Color3.fromRGB(36,36,36)
-    Label.BorderSizePixel = 0
-    Label.Size = UDim2.new(1,0,0,25)
-    Label.Font = Enum.Font.GothamBold
-    Label.Text = text
-    Label.TextColor3 = THEME.text
-    Label.TextScaled = true
-    Label.LayoutOrder = order or 0
-    Instance.new("UICorner", Label).CornerRadius = UDim.new(0,4)
-    return Label
-end
+-- Content and holder
+local content = c("Frame", {Parent = main, Position = UDim2.new(0,162,0,70), Size = UDim2.new(0,280,0,190), BackgroundColor3 = THEME.dark, BorderSizePixel = 0})
+c("UICorner", {Parent = content, CornerRadius = UDim.new(0,10)})
+c("UIPadding", {Parent = content, PaddingTop = UDim2.new(0,12), PaddingLeft = UDim2.new(0,12)})
+local contentHolder = c("Frame", {Parent = content, Size = UDim2.new(1,0,1,0), BackgroundTransparency = 1})
+contentHolder.Name = "ContentHolder"
 
-local function createButton(parent, text, callback, hasToggle, order)
-    local Button = Instance.new("TextButton", parent)
-    Button.BackgroundColor3 = THEME.btnOff
-    Button.BorderSizePixel = 0
-    Button.Size = UDim2.new(1,0,0,28)
-    Button.Font = Enum.Font.Gotham
-    Button.Text = text
-    Button.TextColor3 = THEME.text
-    Button.TextScaled = true
-    Button.TextXAlignment = Enum.TextXAlignment.Left
-    Button.LayoutOrder = order or 0
-    Instance.new("UICorner", Button).CornerRadius = UDim.new(0,4)
-    local ButtonPadding = Instance.new("UIPadding", Button)
-    ButtonPadding.PaddingLeft = UDim.new(0,8)
+-- Dropdown per player selection
+local playerDropdown = c("Frame", {
+    Parent = screenGui,
+    Size = UDim2.new(0, 200, 0, 150),
+    BackgroundColor3 = THEME.panel,
+    BorderSizePixel = 0,
+    Visible = false,
+    ZIndex = 200
+})
+c("UICorner", {Parent = playerDropdown, CornerRadius = UDim.new(0, 8)})
+c("UIStroke", {Parent = playerDropdown, Color = THEME.accent, Thickness = 1})
 
-    local isEnabled = false
-    if hasToggle then
-        local ToggleIndicator = Instance.new("Frame", Button)
-        ToggleIndicator.Name = "ToggleIndicator"
-        ToggleIndicator.BackgroundColor3 = THEME.danger
-        ToggleIndicator.BorderSizePixel = 0
-        ToggleIndicator.Position = UDim2.new(1,-18,0.5,-6)
-        ToggleIndicator.Size = UDim2.new(0,12,0,12)
-        Instance.new("UICorner", ToggleIndicator).CornerRadius = UDim.new(0,6)
+local dropdownScroll = c("ScrollingFrame", {
+    Parent = playerDropdown,
+    Size = UDim2.new(1, -8, 1, -8),
+    Position = UDim2.new(0, 4, 0, 4),
+    BackgroundTransparency = 1,
+    ScrollBarThickness = 6,
+    ScrollBarImageColor3 = THEME.accent
+})
+c("UIListLayout", {Parent = dropdownScroll, Padding = UDim.new(0, 2)})
 
-        Button.MouseButton1Click:Connect(function()
-            isEnabled = not isEnabled
-            ToggleIndicator.BackgroundColor3 = isEnabled and THEME.btnOn or THEME.danger
-            Button.BackgroundColor3 = isEnabled and THEME.btnOn or THEME.btnOff
-            callback(isEnabled, Button)
-        end)
-    else
-        Button.MouseButton1Click:Connect(function() callback(nil, Button) end)
+local currentDropdownAction = nil
+
+local function updatePlayerDropdown(action)
+    currentDropdownAction = action
+    for _, child in pairs(dropdownScroll:GetChildren()) do
+        if child:IsA("TextButton") then child:Destroy() end
     end
-    return Button
-end
-
-local function createCheckbox(parent, text, callback, order)
-    local CheckFrame = Instance.new("Frame", parent)
-    CheckFrame.BackgroundColor3 = Color3.fromRGB(36,36,36)
-    CheckFrame.BorderSizePixel = 0
-    CheckFrame.Size = UDim2.new(1,0,0,25)
-    CheckFrame.LayoutOrder = order or 0
-    Instance.new("UICorner", CheckFrame).CornerRadius = UDim.new(0,4)
-
-    local CheckButton = Instance.new("TextButton", CheckFrame)
-    CheckButton.BackgroundColor3 = THEME.danger
-    CheckButton.BorderSizePixel = 0
-    CheckButton.Position = UDim2.new(0,5,0.5,-8)
-    CheckButton.Size = UDim2.new(0,16,0,16)
-    CheckButton.Font = Enum.Font.GothamBold
-    CheckButton.Text = ""
-    CheckButton.TextColor3 = THEME.text
-    CheckButton.TextScaled = true
-    Instance.new("UICorner", CheckButton).CornerRadius = UDim.new(0,3)
-
-    local CheckLabel = Instance.new("TextLabel", CheckFrame)
-    CheckLabel.BackgroundTransparency = 1
-    CheckLabel.Position = UDim2.new(0,25,0,0)
-    CheckLabel.Size = UDim2.new(1,-25,1,0)
-    CheckLabel.Font = Enum.Font.Gotham
-    CheckLabel.Text = text
-    CheckLabel.TextColor3 = THEME.text
-    CheckLabel.TextScaled = true
-    CheckLabel.TextXAlignment = Enum.TextXAlignment.Left
-
-    local isChecked = false
-    CheckButton.MouseButton1Click:Connect(function()
-        isChecked = not isChecked
-        CheckButton.BackgroundColor3 = isChecked and THEME.btnOn or THEME.danger
-        CheckButton.Text = isChecked and "✓" or ""
-        callback(isChecked)
-    end)
-    return CheckFrame
-end
-
-----------------------------------------------------------------
--- TAB MAIN
-----------------------------------------------------------------
-createLabel(tabFrames["Main"], "Local", 1, Color3.fromRGB(60, 60, 60))
-
--- Multi Jump (safe)
-createButton(tabFrames["Main"], "Multi Jump (safe)", function(enabled)
-    multiJumpEnabled = enabled
-
-    -- cleanup
-    if connections.jumpRequest then connections.jumpRequest:Disconnect() end
-    if connections.mjHumState then connections.mjHumState:Disconnect() end
-    if connections.mjCharAdded then connections.mjCharAdded:Disconnect() end
-
-    local function bindHum(hum)
-        if connections.mjHumState then connections.mjHumState:Disconnect() end
-        connections.mjHumState = hum.StateChanged:Connect(function(_, new)
-            if new == Enum.HumanoidStateType.Landed
-            or new == Enum.HumanoidStateType.Running
-            or new == Enum.HumanoidStateType.RunningNoPhysics then
-                airJumpsUsed = 0
-            end
-        end)
-    end
-
-    if enabled then
-        if Player.Character then
-            local hum = Player.Character:FindFirstChild("Humanoid")
-            if hum then bindHum(hum) end
-        end
-        connections.mjCharAdded = Player.CharacterAdded:Connect(function(char)
-            local hum = char:WaitForChild("Humanoid")
-            bindHum(hum)
-        end)
-
-        connections.jumpRequest = UserInputService.JumpRequest:Connect(function()
-            local char = Player.Character
-            local hum = char and char:FindFirstChild("Humanoid")
-            local root = char and char:FindFirstChild("HumanoidRootPart")
-            if not hum or not root then return end
-
-            local grounded = (hum.FloorMaterial ~= Enum.Material.Air)
-            if grounded then
-                airJumpsUsed = 0
-                return
-            end
-
-            if airJumpsUsed >= maxAirJumps then return end
-            if tick() - lastJumpPulse < 0.2 then return end
-            lastJumpPulse = tick()
-            airJumpsUsed += 1
-
-            local att = root:FindFirstChild("MJ_Att") or Instance.new("Attachment")
-            att.Name = "MJ_Att"; att.Parent = root
-
-            local vf = Instance.new("VectorForce")
-            vf.Attachment0 = att
-            vf.Force = Vector3.new(0, (hum:GetMass() or 70) * 70, 0)
-            vf.ApplyAtCenterOfMass = true
-            vf.Relativity = Enum.ForceRelativity.World
-            vf.Parent = root
-
-            hum:ChangeState(Enum.HumanoidStateType.Jumping)
-
-            task.delay(0.12, function() if vf then vf:Destroy() end end)
-        end)
-        showNotification("Multi Jump ON", THEME.btnOn)
-    else
-        showNotification("Multi Jump OFF", THEME.danger)
-    end
-end, true, 2)
-
-createButton(tabFrames["Main"], "Anti Ragdoll", function(enabled)
-    antiRagdollEnabled = enabled
-    showNotification(enabled and "Anti-Ragdoll Enabled" or "Anti-Ragdoll Disabled",
-        enabled and THEME.btnOn or THEME.danger)
-end, true, 3)
-
-createLabel(tabFrames["Main"], "Player", 4, Color3.fromRGB(60, 60, 60))
-
--- TP Inside
-local function createTpInsideGui()
-    if TpInsideGui then return end
-
-    TpInsideGui = Instance.new("Frame", ScreenGui)
-    TpInsideGui.Name = randstr(8)
-    TpInsideGui.BackgroundColor3 = THEME.panel
-    TpInsideGui.BorderSizePixel = 0
-    TpInsideGui.Position = UDim2.new(0.5, -75, 0.3, -40)
-    TpInsideGui.Size = UDim2.new(0, 150, 0, 80)
-    TpInsideGui.Active = true
-    TpInsideGui.Draggable = true
-
-    Instance.new("UICorner", TpInsideGui).CornerRadius = UDim.new(0, 8)
-    local TpStroke = Instance.new("UIStroke", TpInsideGui)
-    TpStroke.Thickness = 2
-    TpStroke.Color = THEME.accent
-
-    local TpHeader = Instance.new("Frame", TpInsideGui)
-    TpHeader.BackgroundColor3 = THEME.header
-    TpHeader.Size = UDim2.new(1, 0, 0, 25)
-    Instance.new("UICorner", TpHeader).CornerRadius = UDim.new(0, 8)
-
-    local TpTitle = Instance.new("TextLabel", TpHeader)
-    TpTitle.BackgroundTransparency = 1
-    TpTitle.Position = UDim2.new(0, 8, 0, 0)
-    TpTitle.Size = UDim2.new(1, -30, 1, 0)
-    TpTitle.Font = Enum.Font.GothamBold
-    TpTitle.Text = "TP Inside"
-    TpTitle.TextColor3 = THEME.text
-    TpTitle.TextScaled = true
-    TpTitle.TextXAlignment = Enum.TextXAlignment.Left
-
-    local TpClose = Instance.new("TextButton", TpHeader)
-    TpClose.BackgroundColor3 = THEME.danger
-    TpClose.Position = UDim2.new(1, -20, 0.5, -6)
-    TpClose.Size = UDim2.new(0, 12, 0, 12)
-    TpClose.Font = Enum.Font.GothamBold
-    TpClose.Text = "X"
-    TpClose.TextColor3 = THEME.text
-    TpClose.TextScaled = true
-
-    local TpToggle = Instance.new("TextButton", TpInsideGui)
-    TpToggle.BackgroundColor3 = THEME.danger
-    TpToggle.Position = UDim2.new(0, 8, 0, 32)
-    TpToggle.Size = UDim2.new(1, -16, 0, 40)
-    TpToggle.Font = Enum.Font.GothamBold
-    TpToggle.Text = "OFF"
-    TpToggle.TextColor3 = THEME.text
-    TpToggle.TextScaled = true
-    Instance.new("UICorner", TpToggle).CornerRadius = UDim.new(0, 8)
-
-    TpToggle.MouseButton1Click:Connect(function()
-        tpInsideEnabled = not tpInsideEnabled
-        TpToggle.Text = tpInsideEnabled and "ON" or "OFF"
-        TpToggle.BackgroundColor3 = tpInsideEnabled and THEME.btnOn or THEME.danger
-
-        if tpInsideEnabled then
-            connections.tpInside = RunService.Heartbeat:Connect(function()
-                local character = Player.Character
-                local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-                local humanoid = character and character:FindFirstChild("Humanoid")
-                if not rootPart or not humanoid then return end
-
-                for _, p in pairs(character:GetDescendants()) do
-                    if p:IsA("BasePart") and p ~= rootPart then p.CanCollide = false end
+    
+    local playerCount = 0
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= player then
+            playerCount = playerCount + 1
+            local btn = c("TextButton", {
+                Parent = dropdownScroll,
+                Size = UDim2.new(1, 0, 0, 30),
+                BackgroundColor3 = Color3.fromRGB(35, 35, 40),
+                Text = plr.Name,
+                Font = Enum.Font.Gotham,
+                TextSize = 14,
+                TextColor3 = THEME.text,
+                BorderSizePixel = 0
+            })
+            c("UICorner", {Parent = btn, CornerRadius = UDim.new(0, 6)})
+            
+            btn.MouseButton1Click:Connect(function()
+                if action == "jail" then
+                    createJail(plr)
+                elseif action == "unjail" then
+                    removeJail(plr)
                 end
-
-                local moveDirection = Player:GetMoveDirection()
-                if moveDirection.Magnitude > 0 then
-                    local camera = Workspace.CurrentCamera
-                    local worldDirection = (camera.CFrame.LookVector * moveDirection.Z + camera.CFrame.RightVector * moveDirection.X).Unit
-                    rootPart.CFrame = rootPart.CFrame + (worldDirection * 0.8)
-                    humanoid.WalkSpeed = 25
-                else
-                    humanoid.WalkSpeed = 16
-                end
+                playerDropdown.Visible = false
             end)
-            showNotification("TP Inside ON", THEME.btnOn)
+            
+            btn.MouseEnter:Connect(function()
+                safeTween(btn, TweenInfo.new(0.15), {BackgroundColor3 = THEME.accent})
+            end)
+            btn.MouseLeave:Connect(function()
+                safeTween(btn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(35, 35, 40)})
+            end)
+        end
+    end
+    
+    dropdownScroll.CanvasSize = UDim2.new(0, 0, 0, playerCount * 32)
+end
+
+-- Chiudi dropdown cliccando fuori
+UserInputService.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if playerDropdown.Visible then
+            local mousePos = UserInputService:GetMouseLocation()
+            local dropdownPos = playerDropdown.AbsolutePosition
+            local dropdownSize = playerDropdown.AbsoluteSize
+            
+            if mousePos.X < dropdownPos.X or mousePos.X > dropdownPos.X + dropdownSize.X or
+               mousePos.Y < dropdownPos.Y or mousePos.Y > dropdownPos.Y + dropdownSize.Y then
+                playerDropdown.Visible = false
+            end
+        end
+    end
+end)
+
+-- ---------- Activation popup creator function ----------
+local overlayRef = nil
+local popupRefs = {}
+
+local function createActivationPopup()
+    if overlayRef and overlayRef.Parent then pcall(function() overlayRef:Destroy() end) end
+    overlayRef = c("Frame", {Parent = screenGui, Size = UDim2.new(1,0,1,0), BackgroundTransparency = 0.6, BackgroundColor3 = Color3.fromRGB(0,0,0), ZIndex = 50})
+    overlayRef.Visible = true
+
+    local popupCard = c("Frame", {Parent = overlayRef, Size = UDim2.new(0,380,0,180), AnchorPoint = Vector2.new(0.5,0.5), Position = UDim2.new(0.5,0,0.45,0), BackgroundColor3 = THEME.panel, BorderSizePixel = 0, ZIndex = 51})
+    c("UICorner", {Parent = popupCard, CornerRadius = UDim.new(0,14)})
+
+    local header = c("Frame", {Parent = popupCard, Size = UDim2.new(1,0,0,64), BackgroundTransparency = 0})
+    local headerGrad = c("UIGradient", {Parent = header, Rotation = 90})
+    headerGrad.Color = ColorSequence.new{ColorSequenceKeypoint.new(0, THEME.accent), ColorSequenceKeypoint.new(1, Color3.fromRGB(40,80,180))}
+    local popupTitle = c("TextLabel", {Parent = header, Text = "WATER ADMIN", Font = Enum.Font.GothamBold, TextSize = 20, TextColor3 = Color3.fromRGB(255,255,255), BackgroundTransparency = 1})
+    popupTitle.AnchorPoint = Vector2.new(0.5,0.5)
+    popupTitle.Position = UDim2.new(0.5,0,0.5,0)
+    local popupSubtitle = c("TextLabel", {Parent = header, Text = "Insert key to unlock the admin panel", Font = Enum.Font.Gotham, TextSize = 14, TextColor3 = Color3.fromRGB(230,230,235), BackgroundTransparency = 1})
+    popupSubtitle.AnchorPoint = Vector2.new(0.5,0,0,0)
+    popupSubtitle.Position = UDim2.new(0.5,0,0.8,0)
+
+    local keyArea = c("Frame", {Parent = popupCard, Size = UDim2.new(1, -32, 0, 84), Position = UDim2.new(0,16,0,72), BackgroundTransparency = 1})
+    local keyBox = c("TextBox", {Parent = keyArea, Size = UDim2.new(1,0,0,44), Position = UDim2.new(0,0,0,0), Text = "", Font = Enum.Font.Gotham, TextSize = 18, TextColor3 = THEME.text, BackgroundColor3 = Color3.fromRGB(28,28,34), PlaceholderText = "Insert key...", ClearTextOnFocus = false})
+    c("UICorner", {Parent = keyBox, CornerRadius = UDim.new(0,10)})
+    local keyStripe = c("Frame", {Parent = keyBox, Size = UDim2.new(0,8,1,0), Position = UDim2.new(0,0,0,0), BackgroundColor3 = THEME.accent})
+    c("UICorner", {Parent = keyStripe, CornerRadius = UDim.new(0,8)})
+
+    local statusLabel = c("TextLabel", {Parent = keyArea, Text = "", Font = Enum.Font.Gotham, TextSize = 14, TextColor3 = THEME.muted, BackgroundTransparency = 1, Position = UDim2.new(0,0,0,50), Size = UDim2.new(1,0,0,18), TextXAlignment = Enum.TextXAlignment.Center})
+
+    local btnActivate = c("TextButton", {Parent = popupCard, Text = "Activate", Font = Enum.Font.GothamBold, TextSize = 16, TextColor3 = Color3.fromRGB(255,255,255), BackgroundColor3 = THEME.accent, Size = UDim2.new(0,180,0,40), Position = UDim2.new(0.5,-90,0,124)})
+    c("UICorner", {Parent = btnActivate, CornerRadius = UDim.new(0,8)})
+
+    popupCard.Position = UDim2.new(0.5,0,0.2,0)
+    popupCard.Size = UDim2.new(0,320,0,140)
+    popupCard.BackgroundTransparency = 1
+    safeTween(popupCard, TweenInfo.new(0.36, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(0.5,0,0.45,0), Size = UDim2.new(0,380,0,180), BackgroundTransparency = 0})
+
+    local function shakeGui(gui)
+        if not gui then return end
+        local orig = gui.Position
+        local seq = {-10,10,-6,6,-4,4,0}
+        for i,v in ipairs(seq) do
+            delay(0.03*i, function() pcall(function() gui.Position = orig + UDim2.new(0,v,0,0) end) end)
+        end
+        delay(0.25, function() pcall(function() gui.Position = orig end) end)
+    end
+
+    local function showStatus(text, color)
+        statusLabel.Text = text
+        statusLabel.TextColor3 = color or THEME.muted
+        delay(2, function() if statusLabel and statusLabel.Parent then pcall(function() statusLabel.Text = "" end) end end)
+    end
+
+    local function tryActivate(key)
+        key = (key or ""):gsub("%s+","")
+        if key == "" then
+            safeTween(keyBox, TweenInfo.new(0.08), {BackgroundColor3 = Color3.fromRGB(40,40,44)})
+            shakeGui(keyBox)
+            showStatus("Please enter a key", THEME.bad)
+            return false
+        end
+        if key == ACTIVATION_KEY then
+            safeTween(keyStripe, TweenInfo.new(0.12), {BackgroundColor3 = THEME.good})
+            safeTween(keyBox, TweenInfo.new(0.18), {BackgroundColor3 = Color3.fromRGB(24,36,24)})
+            showStatus("Key accepted — unlocking...", THEME.good)
+            safeTween(overlayRef, TweenInfo.new(0.32, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {BackgroundTransparency = 1})
+            safeTween(popupCard, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Position = UDim2.new(0.5,0,0.2,0), Size = UDim2.new(0,300,0,120), BackgroundTransparency = 1})
+            delay(0.36, function()
+                if overlayRef and overlayRef.Parent then pcall(function() overlayRef:Destroy() end) end
+                main.Visible = true
+                main.Position = UDim2.new(0.5,0,-0.6,0)
+                safeTween(main, TweenInfo.new(0.42, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = UDim2.new(0.5,0,0.5,0)})
+            end)
+            return true
         else
-            if connections.tpInside then connections.tpInside:Disconnect() end
-            local character = Player.Character
-            if character then
-                for _, p in pairs(character:GetDescendants()) do
-                    if p:IsA("BasePart") and p.Name ~= "HumanoidRootPart" then p.CanCollide = true end
-                end
-            end
-            showNotification("TP Inside OFF", THEME.danger)
-        end
-    end)
-
-    TpClose.MouseButton1Click:Connect(function()
-        tpInsideEnabled = false
-        if connections.tpInside then connections.tpInside:Disconnect() end
-        TpInsideGui:Destroy()
-        TpInsideGui = nil
-    end)
-end
-
-createButton(tabFrames["Main"], "TP Inside", function()
-    createTpInsideGui()
-end, false, 5)
-
--- Anti Hit
-local function createAntiHitGui()
-    if AntiHitGui then return end
-
-    AntiHitGui = Instance.new("Frame", ScreenGui)
-    AntiHitGui.Name = randstr(8)
-    AntiHitGui.BackgroundColor3 = THEME.panel
-    AntiHitGui.BorderSizePixel = 0
-    AntiHitGui.Position = UDim2.new(0.5, -75, 0.7, -40)
-    AntiHitGui.Size = UDim2.new(0, 150, 0, 80)
-    AntiHitGui.Active = true
-    AntiHitGui.Draggable = true
-
-    Instance.new("UICorner", AntiHitGui).CornerRadius = UDim.new(0, 8)
-    local AntiHitStroke = Instance.new("UIStroke", AntiHitGui)
-    AntiHitStroke.Thickness = 2
-    AntiHitStroke.Color = Color3.fromRGB(255, 100, 150)
-
-    local AntiHitHeader = Instance.new("Frame", AntiHitGui)
-    AntiHitHeader.BackgroundColor3 = THEME.header
-    AntiHitHeader.Size = UDim2.new(1, 0, 0, 25)
-    Instance.new("UICorner", AntiHitHeader).CornerRadius = UDim.new(0, 8)
-
-    local AntiHitTitle = Instance.new("TextLabel", AntiHitHeader)
-    AntiHitTitle.BackgroundTransparency = 1
-    AntiHitTitle.Position = UDim2.new(0, 8, 0, 0)
-    AntiHitTitle.Size = UDim2.new(1, -30, 1, 0)
-    AntiHitTitle.Font = Enum.Font.GothamBold
-    AntiHitTitle.Text = "Anti Hit"
-    AntiHitTitle.TextColor3 = THEME.text
-    AntiHitTitle.TextScaled = true
-    AntiHitTitle.TextXAlignment = Enum.TextXAlignment.Left
-
-    local AntiHitClose = Instance.new("TextButton", AntiHitHeader)
-    AntiHitClose.BackgroundColor3 = THEME.danger
-    AntiHitClose.Position = UDim2.new(1, -20, 0.5, -6)
-    AntiHitClose.Size = UDim2.new(0, 12, 0, 12)
-    AntiHitClose.Font = Enum.Font.GothamBold
-    AntiHitClose.Text = "X"
-    AntiHitClose.TextColor3 = THEME.text
-    AntiHitClose.TextScaled = true
-
-    local AntiHitToggle = Instance.new("TextButton", AntiHitGui)
-    AntiHitToggle.BackgroundColor3 = THEME.danger
-    AntiHitToggle.Position = UDim2.new(0, 8, 0, 32)
-    AntiHitToggle.Size = UDim2.new(1, -16, 0, 40)
-    AntiHitToggle.Font = Enum.Font.GothamBold
-    AntiHitToggle.Text = "Anti Hit OFF"
-    AntiHitToggle.TextColor3 = THEME.text
-    AntiHitToggle.TextScaled = true
-    Instance.new("UICorner", AntiHitToggle).CornerRadius = UDim.new(0, 8)
-
-    AntiHitToggle.MouseButton1Click:Connect(function()
-        antiHitEnabled = not antiHitEnabled
-        AntiHitToggle.Text = antiHitEnabled and "Anti Hit ON" or "Anti Hit OFF"
-        AntiHitToggle.BackgroundColor3 = antiHitEnabled and THEME.btnOn or THEME.danger
-
-        if antiHitEnabled then
-            connections.antiHit = RunService.Heartbeat:Connect(function()
-                local character = Player.Character
-                local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-                if not rootPart then return end
-
-                local isBeingHit = false
-                for _, other in ipairs(Players:GetPlayers()) do
-                    if other ~= Player and other.Character and other.Character:FindFirstChild("HumanoidRootPart") then
-                        if (other.Character.HumanoidRootPart.Position - rootPart.Position).Magnitude < 12 then
-                            if other.Character:FindFirstChild("Tung Bang") then isBeingHit = true break end
-                        end
-                    end
-                end
-                if rootPart.Velocity.Magnitude > 40 then isBeingHit = true end
-
-                if isBeingHit then
-                    local bp = Instance.new("BodyPosition")
-                    bp.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-                    bp.Position = rootPart.Position
-                    bp.P = 50000; bp.D = 5000; bp.Parent = rootPart
-                    rootPart.AssemblyLinearVelocity = Vector3.new()
-                    rootPart.AssemblyAngularVelocity = Vector3.new()
-                    showNotification("ANTI HIT!", THEME.accent)
-                    task.delay(1, function() if bp then bp:Destroy() end end)
-                    task.wait(1.1)
-                end
-            end)
-        else
-            if connections.antiHit then connections.antiHit:Disconnect() end
-        end
-    end)
-
-    AntiHitClose.MouseButton1Click:Connect(function()
-        antiHitEnabled = false
-        if connections.antiHit then connections.antiHit:Disconnect() end
-        AntiHitGui:Destroy()
-        AntiHitGui = nil
-    end)
-end
-
-createButton(tabFrames["Main"], "Anti Hit", function()
-    createAntiHitGui()
-end, false, 6)
-
-createLabel(tabFrames["Main"], "Other", 7, Color3.fromRGB(60, 60, 60))
-
-----------------------------------------------------------------
--- SPEED BOOST (vecchi metodi + AntiKick + GUI stealth)
-----------------------------------------------------------------
-local COIL_NAMES = {"Speed Coil","SpeedCoil","Speed Coil Tool","Coil"}
-local CLOAK_NAMES = {"Invisibility Cloak","Cloak","Invisibility","InvisibilityCloak"}
-
-local function isCloakName(n)
-    n = (n or ""):lower()
-    return n:find("cloak") or n:find("invis")
-end
-
-local function simulateScreenClick(duration)
-    local cam = Workspace.CurrentCamera
-    local vps = cam.ViewportSize
-    local pos = Vector2.new(vps.X/2, vps.Y/2)
-    VirtualUser:Button1Down(pos, cam.CFrame)
-    task.wait(duration or 0.16)
-    VirtualUser:Button1Up(pos, cam.CFrame)
-end
-
-local function findToolByNames(container, names)
-    for _, nm in ipairs(names) do
-        local t = container:FindFirstChild(nm)
-        if t and t:IsA("Tool") then return t end
-    end
-end
-
-local function getCoil()
-    local char = Player.Character
-    if char then
-        local t = findToolByNames(char, COIL_NAMES); if t then return t end
-    end
-    local bp = Player:FindFirstChild("Backpack")
-    if bp then return findToolByNames(bp, COIL_NAMES) end
-end
-
-local function getCloak()
-    local char = Player.Character
-    if char then
-        local t = findToolByNames(char, CLOAK_NAMES); if t then return t end
-    end
-    local bp = Player:FindFirstChild("Backpack")
-    if bp then return findToolByNames(bp, CLOAK_NAMES) end
-end
-
-local function ghostTool(tool)
-    if not tool then return end
-    for _, d in ipairs(tool:GetDescendants()) do
-        if d:IsA("BasePart") then
-            d.LocalTransparencyModifier = 1
-            d.Transparency = 1
-            d.CanCollide = false
-            d.CanQuery = false
-        elseif d:IsA("Decal") then
-            d.Transparency = 1
-        elseif d:IsA("ParticleEmitter") then
-            d.Enabled = false
+            safeTween(keyStripe, TweenInfo.new(0.09), {BackgroundColor3 = THEME.bad})
+            safeTween(keyBox, TweenInfo.new(0.14), {BackgroundColor3 = Color3.fromRGB(44,22,22)})
+            shakeGui(keyBox)
+            showStatus("Invalid key. Try again.", THEME.bad)
+            return false
         end
     end
+
+    btnActivate.MouseButton1Click:Connect(function() tryActivate(keyBox.Text) end)
+    keyBox.FocusLost:Connect(function(enter) if enter then tryActivate(keyBox.Text) end end)
+
+    popupRefs.overlay = overlayRef
+    popupRefs.card = popupCard
+    popupRefs.keyBox = keyBox
 end
 
-local function ensureEquip(tool)
-    local char = Player.Character
-    local hum = char and char:FindFirstChild("Humanoid")
-    if hum and tool and tool.Parent ~= char then pcall(function() hum:EquipTool(tool) end) end
-end
+createActivationPopup()
 
--- Equip una volta Coil + Cloak (ghost) e tap cloack 1 volta
-local function handshakeGhostCoilCloak()
-    local ch = Player.Character
-    local hum = ch and ch:FindFirstChild("Humanoid")
-    if not hum then return end
-    local coil = getCoil()
-    local cloak = getCloak()
-
-    if coil then pcall(function() hum:EquipTool(coil) end) end
-    task.wait(0.06)
-    if cloak then
-        pcall(function() hum:EquipTool(cloak) end)
-        task.delay(0.05, function() simulateScreenClick(0.16) end)
-    end
-    task.delay(0.2, function()
-        pcall(function() hum:UnequipTools() end)
-        if coil and coil.Parent then ghostTool(coil) end
-        if cloak and cloak.Parent then ghostTool(cloak) end
+-- ---------- MAIN TAB CONTENT ----------
+local function createMainContent()
+    for _,v in pairs(contentHolder:GetChildren()) do pcall(function() v:Destroy() end) end
+    
+    local holder = c("Frame", {Parent = contentHolder, Size = UDim2.new(1,0,1,0), BackgroundTransparency = 1})
+    c("UIListLayout", {Parent = holder, Padding = UDim.new(0, 12), FillDirection = Enum.FillDirection.Vertical})
+    
+    -- Jail Button
+    local jailFrame = c("Frame", {Parent = holder, Size = UDim2.new(1, 0, 0, 50), BackgroundTransparency = 1})
+    local jailLabel = c("TextLabel", {Parent = jailFrame, Text = "Jail Player", Font = Enum.Font.GothamBold, TextSize = 16, TextColor3 = THEME.text, BackgroundTransparency = 1, Size = UDim2.new(0.6, 0, 1, 0)})
+    
+    local jailBtn = c("TextButton", {
+        Parent = jailFrame,
+        Size = UDim2.new(0, 100, 0, 40),
+        Position = UDim2.new(1, -100, 0.5, -20),
+        BackgroundColor3 = THEME.switch_bg,
+        Text = "Select Player",
+        Font = Enum.Font.Gotham,
+        TextSize = 14,
+        TextColor3 = THEME.text,
+        BorderSizePixel = 0
+    })
+    c("UICorner", {Parent = jailBtn, CornerRadius = UDim.new(0, 8)})
+    c("UIStroke", {Parent = jailBtn, Color = THEME.accent, Thickness = 1})
+    
+    jailBtn.MouseButton1Click:Connect(function()
+        updatePlayerDropdown("jail")
+        playerDropdown.Position = UDim2.new(0, jailBtn.AbsolutePosition.X, 0, jailBtn.AbsolutePosition.Y + jailBtn.AbsoluteSize.Y + 5)
+        playerDropdown.Visible = true
     end)
-end
-
--- Speed Boost GUI + logica (BV veloce + AntiKick)
-local function createSpeedBoostGui()
-    if speedBoostGui then return end
-
-    speedBoostGui = Instance.new("Frame", ScreenGui)
-    speedBoostGui.Name = randstr(9)
-    speedBoostGui.BackgroundColor3 = THEME.panel
-    speedBoostGui.BorderSizePixel = 0
-    speedBoostGui.Position = UDim2.new(0.5, -85, 0.35, -50)
-    speedBoostGui.Size = UDim2.new(0, 170, 0, 95)
-    speedBoostGui.Active = true
-    speedBoostGui.Draggable = true
-    Instance.new("UICorner", speedBoostGui).CornerRadius = UDim.new(0,8)
-    local s = Instance.new("UIStroke", speedBoostGui); s.Thickness = 2; s.Color = THEME.accent
-
-    local header = Instance.new("Frame", speedBoostGui)
-    header.BackgroundColor3 = THEME.header
-    header.Size = UDim2.new(1,0,0,25)
-    Instance.new("UICorner", header).CornerRadius = UDim.new(0,8)
-
-    local title = Instance.new("TextLabel", header)
-    title.BackgroundTransparency = 1
-    title.Position = UDim2.new(0,8,0,0)
-    title.Size = UDim2.new(1,-30,1,0)
-    title.Font = Enum.Font.GothamBold
-    title.Text = "Speed Boost"
-    title.TextColor3 = THEME.text
-    title.TextScaled = true
-    title.TextXAlignment = Enum.TextXAlignment.Left
-
-    local close = Instance.new("TextButton", header)
-    close.BackgroundColor3 = THEME.danger
-    close.Position = UDim2.new(1,-20,0.5,-6)
-    close.Size = UDim2.new(0,12,0,12)
-    close.Font = Enum.Font.GothamBold
-    close.Text = "X"
-    close.TextColor3 = THEME.text
-    close.TextScaled = true
-    Instance.new("UICorner", close).CornerRadius = UDim.new(0,2)
-
-    local toggleSB = Instance.new("TextButton", speedBoostGui)
-    toggleSB.BackgroundColor3 = speedBoostEnabled and THEME.btnOn or THEME.danger
-    toggleSB.Position = UDim2.new(0,10,0,32)
-    toggleSB.Size = UDim2.new(1,-20,0,25)
-    toggleSB.Font = Enum.Font.GothamBold
-    toggleSB.Text = speedBoostEnabled and "Speed Boost ON" or "Speed Boost OFF"
-    toggleSB.TextColor3 = THEME.text
-    toggleSB.TextScaled = true
-    Instance.new("UICorner", toggleSB).CornerRadius = UDim.new(0,6)
-
-    local status = Instance.new("TextLabel", speedBoostGui)
-    status.BackgroundTransparency = 1
-    status.Position = UDim2.new(0,10,0,65)
-    status.Size = UDim2.new(1,-20,0,20)
-    status.Font = Enum.Font.Gotham
-    status.Text = "BV Fast + Coil/Cloak ghost"
-    status.TextColor3 = THEME.subtext
-    status.TextScaled = true
-
-    -- BV engine (vecchio metodo)
-    local currentSpeed = 0
-    local targetFast = 84   -- velocissimo
-    local accel = 0.45      -- ramp-up
-    local lastHandshake = 0
-
-    local function ensureMotor(root)
-        local bv = root:FindFirstChild(SPEED_BV_NAME)
-        if not bv then
-            bv = Instance.new("BodyVelocity")
-            bv.Name = SPEED_BV_NAME
-            bv.MaxForce = Vector3.new(120000, 0, 120000)
-            bv.Parent = root
-        end
-        return bv
-    end
-
-    local function removeMotor(root)
-        local bv = root and root:FindFirstChild(SPEED_BV_NAME)
-        if bv then bv:Destroy() end
-    end
-
-    local function enableSpeedBoost()
-        -- handshake iniziale (equip ghost coil+cloak + tap 1 volta cloak)
-        handshakeGhostCoilCloak()
-
-        connections.speedBoost = RunService.Heartbeat:Connect(function()
-            local ch = Player.Character
-            local hum = ch and ch:FindFirstChild("Humanoid")
-            local root = ch and ch:FindFirstChild("HumanoidRootPart")
-            if not hum or not root then return end
-
-            local dir = hum.MoveDirection
-            if dir.Magnitude > 0 then
-                currentSpeed = currentSpeed + (targetFast - currentSpeed) * accel
-                local bv = ensureMotor(root)
-                local jitterX = (math.random()-0.5)*1.4
-                local jitterZ = (math.random()-0.5)*1.4
-                bv.Velocity = dir.Unit * currentSpeed + Vector3.new(jitterX, 0, jitterZ)
-
-                -- leggero lift anti-attrito (più stealth)
-                if math.random() < 0.06 then root.CFrame = root.CFrame + Vector3.new(0, 0.05, 0) end
-
-                -- se senti rollback forte, rifai handshake (cooldown)
-                local planar = Vector3.new(root.AssemblyLinearVelocity.X, 0, root.AssemblyLinearVelocity.Z).Magnitude
-                if planar < (targetFast*0.38) and (tick() - lastHandshake) > 1.6 then
-                    lastHandshake = tick()
-                    handshakeGhostCoilCloak()
-                end
-            else
-                removeMotor(root)
-                currentSpeed = 0
-            end
-        end)
-        showNotification("Speed Boost ON", THEME.btnOn)
-    end
-
-    local function disableSpeedBoost()
-        if connections.speedBoost then connections.speedBoost:Disconnect() connections.speedBoost=nil end
-        local root = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
-        if root then removeMotor(root) end
-        showNotification("Speed Boost OFF", THEME.danger)
-    end
-
-    toggleSB.MouseButton1Click:Connect(function()
-        speedBoostEnabled = not speedBoostEnabled
-        toggleSB.Text = speedBoostEnabled and "Speed Boost ON" or "Speed Boost OFF"
-        toggleSB.BackgroundColor3 = speedBoostEnabled and THEME.btnOn or THEME.danger
-        if speedBoostEnabled then
-            enableSpeedBoost()
-            -- se cloak già in mano -> un tap singolo
-            local ch = Player.Character
-            if ch then
-                for _, t in ipairs(ch:GetChildren()) do
-                    if t:IsA("Tool") and isCloakName(t.Name) then
-                        task.delay(0.05, function() simulateScreenClick(0.16) end)
-                        break
-                    end
-                end
-            end
-        else
-            disableSpeedBoost()
-        end
+    
+    -- Unjail Button
+    local unjailFrame = c("Frame", {Parent = holder, Size = UDim2.new(1, 0, 0, 50), BackgroundTransparency = 1})
+    local unjailLabel = c("TextLabel", {Parent = unjailFrame, Text = "Unjail Player", Font = Enum.Font.GothamBold, TextSize = 16, TextColor3 = THEME.text, BackgroundTransparency = 1, Size = UDim2.new(0.6, 0, 1, 0)})
+    
+    local unjailBtn = c("TextButton", {
+        Parent = unjailFrame,
+        Size = UDim2.new(0, 100, 0, 40),
+        Position = UDim2.new(1, -100, 0.5, -20),
+        BackgroundColor3 = THEME.switch_bg,
+        Text = "Select Player",
+        Font = Enum.Font.Gotham,
+        TextSize = 14,
+        TextColor3 = THEME.text,
+        BorderSizePixel = 0
+    })
+    c("UICorner", {Parent = unjailBtn, CornerRadius = UDim.new(0, 8)})
+    c("UIStroke", {Parent = unjailBtn, Color = THEME.bad, Thickness = 1})
+    
+    unjailBtn.MouseButton1Click:Connect(function()
+        updatePlayerDropdown("unjail")
+        playerDropdown.Position = UDim2.new(0, unjailBtn.AbsolutePosition.X, 0, unjailBtn.AbsolutePosition.Y + unjailBtn.AbsoluteSize.Y + 5)
+        playerDropdown.Visible = true
     end)
-
-    close.MouseButton1Click:Connect(function()
-        speedBoostGui:Destroy()
-        speedBoostGui = nil
+    
+    -- Hover effects
+    jailBtn.MouseEnter:Connect(function()
+        safeTween(jailBtn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(60, 60, 65)})
+    end)
+    jailBtn.MouseLeave:Connect(function()
+        safeTween(jailBtn, TweenInfo.new(0.2), {BackgroundColor3 = THEME.switch_bg})
+    end)
+    
+    unjailBtn.MouseEnter:Connect(function()
+        safeTween(unjailBtn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(60, 60, 65)})
+    end)
+    unjailBtn.MouseLeave:Connect(function()
+        safeTween(unjailBtn, TweenInfo.new(0.2), {BackgroundColor3 = THEME.switch_bg})
     end)
 end
 
-createButton(tabFrames["Main"], "Speed Boost (GUI)", function()
-    createSpeedBoostGui()
-end, false, 8)
-
-----------------------------------------------------------------
--- TWEEN STEAL (solo Start Steal - fast float)
-----------------------------------------------------------------
-local function createTweenStealGui()
-    if TweenStealGui then return end
-
-    TweenStealGui = Instance.new("Frame", ScreenGui)
-    TweenStealGui.Name = randstr(8)
-    TweenStealGui.BackgroundColor3 = THEME.panel
-    TweenStealGui.BorderSizePixel = 0
-    TweenStealGui.Position = UDim2.new(0.5, -85, 0.5, -90)
-    TweenStealGui.Size = UDim2.new(0, 170, 0, 180)
-    TweenStealGui.Active = true
-    TweenStealGui.Draggable = true
-    Instance.new("UICorner", TweenStealGui).CornerRadius = UDim.new(0, 8)
-    local stroke = Instance.new("UIStroke", TweenStealGui)
-    stroke.Thickness = 2
-    stroke.Color = Color3.fromRGB(100,255,100)
-
-    local header = Instance.new("Frame", TweenStealGui)
-    header.BackgroundColor3 = THEME.header
-    header.Size = UDim2.new(1, 0, 0, 25)
-    Instance.new("UICorner", header).CornerRadius = UDim.new(0, 8)
-
-    local title = Instance.new("TextLabel", header)
-    title.BackgroundTransparency = 1
-    title.Position = UDim2.new(0, 8, 0, 0)
-    title.Size = UDim2.new(1, -30, 1, 0)
-    title.Font = Enum.Font.GothamBold
-    title.Text = "Tween Steal"
-    title.TextColor3 = THEME.text
-    title.TextScaled = true
-    title.TextXAlignment = Enum.TextXAlignment.Left
-
-    local close = Instance.new("TextButton", header)
-    close.BackgroundColor3 = THEME.danger
-    close.Position = UDim2.new(1, -20, 0.5, -6)
-    close.Size = UDim2.new(0, 12, 0, 12)
-    close.Font = Enum.Font.GothamBold
-    close.Text = "X"
-    close.TextColor3 = THEME.text
-    close.TextScaled = true
-    Instance.new("UICorner", close).CornerRadius = UDim.new(0,2)
-
-    local setPosBtn = Instance.new("TextButton", TweenStealGui)
-    setPosBtn.BackgroundColor3 = THEME.btnOff
-    setPosBtn.Position = UDim2.new(0, 10, 0, 32)
-    setPosBtn.Size = UDim2.new(1, -20, 0, 25)
-    setPosBtn.Font = Enum.Font.Gotham
-    setPosBtn.Text = "Set Position"
-    setPosBtn.TextColor3 = THEME.text
-    setPosBtn.TextScaled = true
-    Instance.new("UICorner", setPosBtn).CornerRadius = UDim2.new(0, 6)
-
-    local startBtn = Instance.new("TextButton", TweenStealGui)
-    startBtn.BackgroundColor3 = THEME.btnOff
-    startBtn.Position = UDim2.new(0, 10, 0, 65)
-    startBtn.Size = UDim2.new(1, -20, 0, 25)
-    startBtn.Font = Enum.Font.Gotham
-    startBtn.Text = "Start Steal (Fast Float)"
-    startBtn.TextColor3 = THEME.text
-    startBtn.TextScaled = true
-    Instance.new("UICorner", startBtn).CornerRadius = UDim2.new(0, 6)
-
-    local status = Instance.new("TextLabel", TweenStealGui)
-    status.BackgroundTransparency = 1
-    status.Position = UDim2.new(0, 10, 0, 98)
-    status.Size = UDim2.new(1, -20, 0, 15)
-    status.Font = Enum.Font.Gotham
-    status.Text = setPosition and "Position Set!" or "No Position"
-    status.TextColor3 = setPosition and THEME.btnOn or THEME.danger
-    status.TextScaled = true
-
-    local acFrame = Instance.new("Frame", TweenStealGui)
-    acFrame.BackgroundTransparency = 1
-    acFrame.Position = UDim2.new(0, 10, 0, 120)
-    acFrame.Size = UDim2.new(1, -20, 0, 25)
-    local acToggle = Instance.new("TextButton", acFrame)
-    acToggle.BackgroundColor3 = THEME.danger
-    acToggle.Position = UDim2.new(0, 0, 0, 0)
-    acToggle.Size = UDim2.new(0, 20, 1, 0)
-    acToggle.Font = Enum.Font.GothamBold
-    acToggle.Text = ""
-    acToggle.TextColor3 = THEME.text
-    acToggle.TextScaled = true
-    Instance.new("UICorner", acToggle).CornerRadius = UDim2.new(0,3)
-    local acLabel = Instance.new("TextLabel", acFrame)
-    acLabel.BackgroundTransparency = 1
-    acLabel.Position = UDim2.new(0, 25, 0, 0)
-    acLabel.Size = UDim2.new(1, -25, 1, 0)
-    acLabel.Font = Enum.Font.Gotham
-    acLabel.Text = "Auto Complete"
-    acLabel.TextColor3 = THEME.text
-    acLabel.TextScaled = true
-    acLabel.TextXAlignment = Enum.TextXAlignment.Left
-
-    acToggle.MouseButton1Click:Connect(function()
-        autoCompleteSteal = not autoCompleteSteal
-        acToggle.BackgroundColor3 = autoCompleteSteal and THEME.btnOn or THEME.danger
-        acToggle.Text = autoCompleteSteal and "✓" or ""
-    end)
-
-    setPosBtn.MouseButton1Click:Connect(function()
-        local root = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
-        if root then
-            setPosition = root.Position
-            status.Text = "Position Set!"
-            status.TextColor3 = THEME.btnOn
-            showNotification("Position Set!", THEME.btnOn)
-        end
-    end)
-
-    startBtn.MouseButton1Click:Connect(function()
-        if not setPosition then
-            showNotification("Set Position First!", THEME.danger)
-            return
-        end
-        local char = Player.Character
-        local root = char and char:FindFirstChild("HumanoidRootPart")
-        local hum = char and char:FindFirstChild("Humanoid")
-        if not root or not hum then return end
-
-        testV1Active = true
-        showNotification("Start Steal (Fast Float)!", THEME.btnOn)
-
-        task.spawn(function()
-            local phase = 0
-            local speed = 46
-            local bv = Instance.new("BodyVelocity")
-            bv.Name = STEAL_BV_NAME
-            bv.MaxForce = Vector3.new(50000,12000,50000)
-            bv.Parent = root
-            while testV1Active and char and root and hum do
-                local target = Vector3.new(setPosition.X, setPosition.Y + 7, setPosition.Z)
-                local d = target - root.Position
-                if d.Magnitude < 3 then break end
-                local dir = d.Unit
-                phase += 0.25
-                local fy = math.sin(phase)*0.6
-                bv.Velocity = dir*speed + Vector3.new(0,fy,0)
-                if math.random() < 0.04 then task.wait(0.015) end
-                task.wait(0.02)
-            end
-            testV1Active = false
-            if bv then bv:Destroy() end
-            root.AssemblyLinearVelocity = Vector3.new()
-            root.AssemblyAngularVelocity = Vector3.new()
-
-            if (Vector3.new(setPosition.X,setPosition.Y+7,setPosition.Z) - root.Position).Magnitude < 4 then
-                showNotification("Steal completed!", THEME.btnOn)
-                if autoCompleteSteal then task.wait(0.8); Player:Kick("Steal completed #thx for using script") end
-            end
-        end)
-    end)
-
-    close.MouseButton1Click:Connect(function()
-        testV1Active = false
-        local root = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
-        if root then
-            for _, v in ipairs(root:GetChildren()) do if v:IsA("BodyVelocity") then v:Destroy() end end
-            root.AssemblyLinearVelocity = Vector3.new()
-            root.AssemblyAngularVelocity = Vector3.new()
-        end
-        TweenStealGui:Destroy()
-        TweenStealGui = nil
-    end)
-end
-
-createButton(tabFrames["Main"], "Tween Steal", function()
-    createTweenStealGui()
-end, false, 9)
-
-----------------------------------------------------------------
--- VISUAL TAB
-----------------------------------------------------------------
-createButton(tabFrames["Visual"], "ESP Players", function(enabled)
-    espEnabled = enabled
-    showNotification(enabled and "ESP Enabled" or "ESP Disabled", enabled and THEME.btnOn or THEME.danger)
-
-    if enabled then
-        for _, p in pairs(Players:GetPlayers()) do
-            if p ~= Player and p.Character then
-                local h = Instance.new("Highlight", p.Character)
-                h.Name = "ESPHighlight"
-                h.FillColor = Color3.fromRGB(255, 0, 0)
-                h.OutlineColor = THEME.text
-                h.FillTransparency = 0.5
-            end
-        end
-        connections.espPlayerAdded = Players.PlayerAdded:Connect(function(p)
-            p.CharacterAdded:Connect(function(c)
-                if espEnabled then
-                    task.wait(1)
-                    local h = Instance.new("Highlight", c)
-                    h.Name = "ESPHighlight"
-                    h.FillColor = Color3.fromRGB(255, 0, 0)
-                    h.OutlineColor = THEME.text
-                    h.FillTransparency = 0.5
-                end
-            end)
-        end)
+local function populateTab(name)
+    for n,b in pairs(tabButtons) do
+        local targetBg = (n == name) and THEME.accent or Color3.fromRGB(30,30,36)
+        local targetText = (n == name) and THEME.text or THEME.muted
+        safeTween(b, TweenInfo.new(0.18), {BackgroundColor3 = targetBg})
+        safeTween(b, TweenInfo.new(0.18), {TextColor3 = targetText})
+    end
+    
+    if name == "Main" then
+        createMainContent()
     else
-        for _, p in pairs(Players:GetPlayers()) do
-            if p.Character and p.Character:FindFirstChild("ESPHighlight") then p.Character.ESPHighlight:Destroy() end
-        end
-        if connections.espPlayerAdded then connections.espPlayerAdded:Disconnect() end
+        -- Placeholder per altre tab
+        for _,v in pairs(contentHolder:GetChildren()) do pcall(function() v:Destroy() end) end
+        local placeholder = c("TextLabel", {
+            Parent = contentHolder,
+            Text = "Coming Soon...",
+            Font = Enum.Font.Gotham,
+            TextSize = 18,
+            TextColor3 = THEME.muted,
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 1, 0),
+            TextXAlignment = Enum.TextXAlignment.Center,
+            TextYAlignment = Enum.TextYAlignment.Center
+        })
     end
-end, true)
-
-createButton(tabFrames["Visual"], "ESP Timer", function(enabled)
-    espTimerEnabled = enabled
-    if enabled then
-        local enhanced = {}
-        local function enhance()
-            pcall(function()
-                for _, obj in pairs(Workspace:GetDescendants()) do
-                    if obj.Name == "RemainingTime" and obj:IsA("TextLabel") and not enhanced[obj] then
-                        local b = obj.Parent
-                        if b and b:IsA("BillboardGui") then
-                            task.spawn(function()
-                                task.wait(0.1)
-                                b.Size = UDim2.new(0, 280, 0, 70)
-                                b.AlwaysOnTop = true
-                                b.MaxDistance = 0
-                                obj.TextScaled = true
-                                obj.Font = Enum.Font.GothamBold
-                                obj.TextStrokeTransparency = 0
-                                obj.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-                                obj.BackgroundTransparency = 1
-                                obj.TextSize = 24
-                                enhanced[obj] = true
-                            end)
-                        end
-                    end
-                end
-            end)
-        end
-        enhance()
-        connections.espTimerScanner = RunService.Heartbeat:Connect(function()
-            if tick() % 0.5 < 0.1 then enhance() end
-        end)
-    else
-        if connections.espTimerScanner then connections.espTimerScanner:Disconnect() end
-    end
-end, true)
-
--- ESP Brainrot SOLO "La Vacca Saturno Saturnita"
-createButton(tabFrames["Visual"], "ESP Brainrot (Saturno)", function(enabled)
-    espBrainrotEnabled = enabled
-    local TARGET = "La Vacca Saturno Saturnita"
-
-    local function clearESP()
-        for _, o in pairs(Workspace:GetDescendants()) do
-            local h = o:FindFirstChild("SaturnoESP")
-            if h then h:Destroy() end
-        end
-    end
-
-    if enabled then
-        local function apply()
-            for _, o in pairs(Workspace:GetDescendants()) do
-                if o.Name == TARGET then
-                    if not o:FindFirstChild("SaturnoESP") then
-                        local h = Instance.new("Highlight", o)
-                        h.Name = "SaturnoESP"
-                        h.FillColor = Color3.fromRGB(255, 215, 0)
-                        h.OutlineColor = Color3.fromRGB(0, 0, 0)
-                        h.FillTransparency = 0.25
-                        h.OutlineTransparency = 0
-                    end
-                end
-            end
-        end
-        apply()
-        connections.espBrainrot = RunService.Heartbeat:Connect(function()
-            if (tick() % 1.5) < 0.05 then apply() end
-        end)
-        showNotification("ESP Saturno ON", THEME.btnOn)
-    else
-        if connections.espBrainrot then connections.espBrainrot:Disconnect() end
-        clearESP()
-        showNotification("ESP Saturno OFF", THEME.danger)
-    end
-end, true)
-
-----------------------------------------------------------------
--- MISC TAB
-----------------------------------------------------------------
-createButton(tabFrames["Misc"], "God Mode", function(enabled)
-    godModeEnabled = enabled
-    local char = Player.Character
-    local hum = char and char:FindFirstChild("Humanoid")
-
-    if enabled and hum then
-        hum.MaxHealth = math.huge
-        hum.Health = math.huge
-        if connections.godMode then connections.godMode:Disconnect() end
-        connections.godMode = hum.HealthChanged:Connect(function(hp)
-            if hum and hum.Parent and hp < hum.MaxHealth then hum.Health = hum.MaxHealth end
-        end)
-        showNotification("God Mode Enabled", Color3.fromRGB(255, 215, 0))
-    else
-        if connections.godMode then connections.godMode:Disconnect() end
-        if hum then hum.MaxHealth = 100 hum.Health = 100 end
-        showNotification("God Mode Disabled", THEME.danger)
-    end
-end, true)
-
-local kingGui = nil
-createCheckbox(tabFrames["Misc"], "King Mode", function(enabled)
-    kingModeEnabled = enabled
-    if enabled then
-        local head = Player.Character and Player.Character:FindFirstChild("Head")
-        if head then
-            kingGui = Instance.new("BillboardGui", head)
-            kingGui.Name = "KingGui"
-            kingGui.Size = UDim2.new(0, 150, 0, 40)
-            kingGui.StudsOffset = Vector3.new(0, 3, 0)
-            kingGui.AlwaysOnTop = true
-
-            local fr = Instance.new("Frame", kingGui)
-            fr.Size = UDim2.new(1, 0, 1, 0)
-            fr.BackgroundColor3 = Color3.fromRGB(139, 0, 0)
-            fr.BorderSizePixel = 0
-            Instance.new("UICorner", fr).CornerRadius = UDim.new(0, 10)
-            local st = Instance.new("UIStroke", fr); st.Thickness = 3; st.Color = Color3.fromRGB(255, 215, 0)
-            local lb = Instance.new("TextLabel", fr)
-            lb.Size = UDim2.new(1, 0, 1, 0)
-            lb.BackgroundTransparency = 1
-            lb.Text = "👑 KING 👑"
-            lb.TextColor3 = Color3.fromRGB(255, 215, 0)
-            lb.TextScaled = true
-            lb.Font = Enum.Font.GothamBold
-            lb.TextStrokeTransparency = 0
-            lb.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-            task.spawn(function()
-                while kingModeEnabled and kingGui and kingGui.Parent do
-                    for i = 1, 30 do
-                        if not kingModeEnabled then break end
-                        local sc = 1 + math.sin(i * 0.2) * 0.1
-                        lb.Size = UDim2.new(sc, 0, sc, 0)
-                        lb.Position = UDim2.new((1-sc)/2, 0, (1-sc)/2, 0)
-                        task.wait(0.05)
-                    end
-                end
-            end)
-
-            local att = Instance.new("Attachment", head)
-            local particles = Instance.new("ParticleEmitter", att)
-            particles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-            particles.Lifetime = NumberRange.new(1.0, 2.0)
-            particles.Rate = 30
-            particles.SpreadAngle = Vector2.new(360, 360)
-            particles.Speed = NumberRange.new(5, 10)
-            particles.Color = ColorSequence.new(Color3.fromRGB(255, 215, 0))
-        end
-        showNotification("👑 KING MODE ACTIVATED 👑", Color3.fromRGB(255, 215, 0))
-    else
-        if kingGui then kingGui:Destroy() kingGui = nil end
-        local head = Player.Character and Player.Character:FindFirstChild("Head")
-        if head then for _, o in ipairs(head:GetChildren()) do if o:IsA("Attachment") then o:Destroy() end end end
-        showNotification("King Mode Disabled", THEME.danger)
-    end
-end)
-
-----------------------------------------------------------------
--- Kill Aura
-----------------------------------------------------------------
-local function createKillAuraOptionsGui()
-    if KillAuraOptionsGui then return end
-
-    KillAuraOptionsGui = Instance.new("Frame", ScreenGui)
-    KillAuraOptionsGui.Name = randstr(8)
-    KillAuraOptionsGui.BackgroundColor3 = THEME.panel
-    KillAuraOptionsGui.BorderSizePixel = 0
-    KillAuraOptionsGui.Position = UDim2.new(0.5, -75, 0.4, -60)
-    KillAuraOptionsGui.Size = UDim2.new(0, 150, 0, 120)
-    KillAuraOptionsGui.Active = true
-    KillAuraOptionsGui.Draggable = true
-    Instance.new("UICorner", KillAuraOptionsGui).CornerRadius = UDim.new(0, 8)
-    local KillAuraStroke = Instance.new("UIStroke", KillAuraOptionsGui)
-    KillAuraStroke.Thickness = 2
-    KillAuraStroke.Color = Color3.fromRGB(255, 0, 0)
-
-    local KillAuraHeader = Instance.new("Frame", KillAuraOptionsGui)
-    KillAuraHeader.BackgroundColor3 = THEME.header
-    KillAuraHeader.Size = UDim2.new(1, 0, 0, 25)
-    Instance.new("UICorner", KillAuraHeader).CornerRadius = UDim.new(0, 8)
-
-    local KillAuraTitle = Instance.new("TextLabel", KillAuraHeader)
-    KillAuraTitle.BackgroundTransparency = 1
-    KillAuraTitle.Position = UDim2.new(0, 8, 0, 0)
-    KillAuraTitle.Size = UDim2.new(1, -30, 1, 0)
-    KillAuraTitle.Font = Enum.Font.GothamBold
-    KillAuraTitle.Text = "Kill Aura Options"
-    KillAuraTitle.TextColor3 = THEME.text
-    KillAuraTitle.TextScaled = true
-    KillAuraTitle.TextXAlignment = Enum.TextXAlignment.Left
-
-    local CheckboxContainer = Instance.new("Frame", KillAuraOptionsGui)
-    CheckboxContainer.BackgroundTransparency = 1
-    CheckboxContainer.Position = UDim2.new(0, 8, 0, 30)
-    CheckboxContainer.Size = UDim2.new(1, -16, 1, -38)
-    local CheckboxLayout = Instance.new("UIListLayout", CheckboxContainer)
-    CheckboxLayout.Padding = UDim.new(0, 5)
-    CheckboxLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
-    createCheckbox(CheckboxContainer, "360 Kill Aura", function(enabled) killAura360Enabled = enabled end, 1)
-    createCheckbox(CheckboxContainer, "Multi Kill Aura", function(enabled) multiKillAuraEnabled = enabled end, 2)
-    createCheckbox(CheckboxContainer, "King Kill Aura", function(enabled) kingKillAuraEnabled = enabled end, 3)
 end
 
-createButton(tabFrames["Misc"], "Kill Aura 360", function(enabled)
-    killAuraEnabled = enabled
-    if enabled then
-        local tungBat = Player.Backpack:FindFirstChild("Tung Bat") or (Player.Character and Player.Character:FindFirstChild("Tung Bat"))
-        if not tungBat then
-            showNotification("Tung Bat not found!", THEME.danger)
-            return
-        end
-        if tungBat.Parent == Player.Backpack and Player.Character and Player.Character:FindFirstChild("Humanoid") then
-            Player.Character.Humanoid:EquipTool(tungBat)
-        end
-        createKillAuraOptionsGui()
-
-        connections.killAura = RunService.Heartbeat:Connect(function()
-            local tool = Player.Character and Player.Character:FindFirstChild("Tung Bat")
-            local rp = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
-            if not tool or not rp then return end
-
-            for _, other in ipairs(Players:GetPlayers()) do
-                if other ~= Player and other.Character and other.Character:FindFirstChild("HumanoidRootPart") then
-                    local d = (other.Character.HumanoidRootPart.Position - rp.Position).Magnitude
-                    local range = 15
-                    if killAura360Enabled then range = 25 end
-                    if multiKillAuraEnabled then range = 20 end
-                    if kingKillAuraEnabled then range = 50 end
-
-                    if d < range then
-                        if kingKillAuraEnabled then
-                            local pos = other.Character.HumanoidRootPart.Position + Vector3.new(0, 5, 0)
-                            rp.CFrame = CFrame.new(pos, other.Character.HumanoidRootPart.Position)
-                            tool:Activate()
-                            task.wait(0.1)
-                            tool:Activate()
-                        else
-                            tool:Activate()
-                        end
-                        if multiKillAuraEnabled then for i=1,3 do tool:Activate(); task.wait(0.05) end end
-                    end
-                end
-            end
-            task.wait(0.1)
-        end)
-        showNotification("Kill Aura 360 Enabled", Color3.fromRGB(255, 0, 0))
-    else
-        if connections.killAura then connections.killAura:Disconnect() end
-        if KillAuraOptionsGui then KillAuraOptionsGui:Destroy() KillAuraOptionsGui = nil end
-        showNotification("Kill Aura 360 Disabled", THEME.danger)
-    end
-end, true)
-
-----------------------------------------------------------------
--- SERVER TAB
-----------------------------------------------------------------
-local function createServerGui(action, actionText)
-    local ServerGui = Instance.new("Frame", ScreenGui)
-    ServerGui.Name = randstr(7)
-    ServerGui.BackgroundColor3 = THEME.panel
-    ServerGui.BorderSizePixel = 0
-    ServerGui.Position = UDim2.new(0.5, -75, 0.5, -40)
-    ServerGui.Size = UDim2.new(0, 150, 0, 80)
-    ServerGui.Active = true
-    ServerGui.Draggable = true
-    Instance.new("UICorner", ServerGui).CornerRadius = UDim.new(0, 8)
-    local ServerStroke = Instance.new("UIStroke", ServerGui)
-    ServerStroke.Thickness = 2
-    ServerStroke.Color = Color3.fromRGB(100, 200, 255)
-
-    local ServerHeader = Instance.new("Frame", ServerGui)
-    ServerHeader.BackgroundColor3 = THEME.header
-    ServerHeader.Size = UDim2.new(1, 0, 0, 25)
-    Instance.new("UICorner", ServerHeader).CornerRadius = UDim.new(0, 8)
-
-    local ServerTitle = Instance.new("TextLabel", ServerHeader)
-    ServerTitle.BackgroundTransparency = 1
-    ServerTitle.Position = UDim2.new(0, 8, 0, 0)
-    ServerTitle.Size = UDim2.new(1, -30, 1, 0)
-    ServerTitle.Font = Enum.Font.GothamBold
-    ServerTitle.Text = actionText
-    ServerTitle.TextColor3 = THEME.text
-    ServerTitle.TextScaled = true
-    ServerTitle.TextXAlignment = Enum.TextXAlignment.Left
-
-    local ServerClose = Instance.new("TextButton", ServerHeader)
-    ServerClose.BackgroundColor3 = THEME.danger
-    ServerClose.Position = UDim2.new(1, -20, 0.5, -6)
-    ServerClose.Size = UDim2.new(0, 12, 0, 12)
-    ServerClose.Font = Enum.Font.GothamBold
-    ServerClose.Text = "X"
-    ServerClose.TextColor3 = THEME.text
-    ServerClose.TextScaled = true
-
-    local ActionButton = Instance.new("TextButton", ServerGui)
-    ActionButton.BackgroundColor3 = THEME.btnOff
-    ActionButton.Position = UDim2.new(0, 8, 0, 32)
-    ActionButton.Size = UDim2.new(1, -16, 0, 40)
-    ActionButton.Font = Enum.Font.GothamBold
-    ActionButton.Text = actionText
-    ActionButton.TextColor3 = THEME.text
-    ActionButton.TextScaled = true
-    Instance.new("UICorner", ActionButton).CornerRadius = UDim.new(0, 8)
-
-    ActionButton.MouseButton1Click:Connect(function() action() ServerGui:Destroy() end)
-    ServerClose.MouseButton1Click:Connect(function() ServerGui:Destroy() end)
-    return ServerGui
-end
-
-createButton(tabFrames["Server"], "Server Hop", function()
-    createServerGui(function() TeleportService:Teleport(game.PlaceId, Player) end, "Server Hop")
-end)
-
-createButton(tabFrames["Server"], "Server Rejoin", function()
-    createServerGui(function() TeleportService:Teleport(game.PlaceId, Player) end, "Server Rejoin")
-end)
-
-createButton(tabFrames["Server"], "Server Leave", function()
-    createServerGui(function() game:Shutdown() end, "Server Leave")
-end)
-
--- Tab switching
-for tabName, button in pairs(tabButtons) do
-    button.MouseButton1Click:Connect(function()
-        for name, frame in pairs(tabFrames) do frame.Visible = (name == tabName) end
-        for name, btn in pairs(tabButtons) do
-            btn.BackgroundColor3 = (name == tabName) and Color3.fromRGB(65, 65, 65) or Color3.fromRGB(45, 45, 45)
-        end
+for name, btn in pairs(tabButtons) do
+    btn.MouseButton1Click:Connect(function()
+        safeTween(btn, TweenInfo.new(0.06), {Size = UDim2.new(1,-8,0,36)})
+        delay(0.06, function() safeTween(btn, TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = UDim2.new(1,-8,0,40)}) end)
+        populateTab(name)
     end)
 end
 
--- Minimize/Close
-local isMinimized = false
-MinimizeButton.MouseButton1Click:Connect(function()
-    isMinimized = not isMinimized
-    local targetSize = isMinimized and UDim2.new(0, 250, 0, 50) or UDim2.new(0, 250, 0, 320)
-    TweenService:Create(MainFrame, TweenInfo.new(0.3), {Size = targetSize}):Play()
-    for _, frame in pairs(tabFrames) do frame.Visible = not isMinimized and frame == tabFrames["Main"] end
-    TabContainer.Visible = not isMinimized
-    CreditFrame.Visible = not isMinimized
+populateTab("Main")
+
+-- ---------- MINIMIZE / RESTORE ----------
+local minimized = false
+
+local function doMinimize()
+    if minimized then return end
+    minimized = true
+    
+    safeTween(main, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+        Size = UDim2.new(0, 0, 0, 0), 
+        BackgroundTransparency = 1
+    })
+    
+    delay(0.3, function()
+        main.Visible = false
+        minimizedCircle.Visible = true
+        minimizedCircle.Size = UDim2.new(0, 20, 0, 20)
+        minimizedCircle.BackgroundTransparency = 1
+        safeTween(minimizedCircle, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0, 60, 0, 60),
+            BackgroundTransparency = 0
+        })
+    end)
+end
+
+local function doRestore()
+    if not minimized then return end
+    minimized = false
+    
+    safeTween(minimizedCircle, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+        Size = UDim2.new(0, 20, 0, 20),
+        BackgroundTransparency = 1
+    })
+    
+    delay(0.25, function()
+        minimizedCircle.Visible = false
+        main.Visible = true
+        main.Size = UDim2.new(0, 200, 0, 150)
+        main.BackgroundTransparency = 1
+        safeTween(main, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0, 460, 0, 280),
+            BackgroundTransparency = 0
+        })
+    end)
+end
+
+miniBtn.MouseButton1Click:Connect(doMinimize)
+circleButton.MouseButton1Click:Connect(doRestore)
+
+circleButton.MouseEnter:Connect(function()
+    safeTween(minimizedCircle, TweenInfo.new(0.2), {Size = UDim2.new(0, 70, 0, 70)})
+    safeTween(minimizedCircle, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(90, 150, 255)})
 end)
 
-CloseButton.MouseButton1Click:Connect(function()
-    for _, c in pairs(connections) do pcall(function() c:Disconnect() end) end
-    if waveConnection then waveConnection:Disconnect() end
-    ScreenGui:Destroy()
+circleButton.MouseLeave:Connect(function()
+    safeTween(minimizedCircle, TweenInfo.new(0.2), {Size = UDim2.new(0, 60, 0, 60)})
+    safeTween(minimizedCircle, TweenInfo.new(0.2), {BackgroundColor3 = THEME.accent})
 end)
 
--- Character respawn
-Player.CharacterAdded:Connect(function(character)
-    task.wait(0.5)
-    airJumpsUsed = 0
-    if godModeEnabled then
-        local hum = character:WaitForChild("Humanoid")
-        hum.MaxHealth = math.huge
-        hum.Health = math.huge
-        if connections.godMode then connections.godMode:Disconnect() end
-        connections.godMode = hum.HealthChanged:Connect(function(hp)
-            if hum and hum.Parent and hp < hum.MaxHealth then hum.Health = hum.MaxHealth end
-        end)
+closeBtn.MouseButton1Click:Connect(function()
+    safeTween(main, TweenInfo.new(0.18), {Size = UDim2.new(0,220,0,80), BackgroundTransparency = 1})
+    delay(0.18, function() if screenGui and screenGui.Parent then pcall(function() screenGui:Destroy() end) end end)
+end)
+
+-- Draggable
+local dragging = false
+local dragStart = Vector2.new()
+local startPos = main.Position
+
+local function inputBeganOnFrame(input)
+    if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+    if UserInputService:GetFocusedTextBox() then return end
+    dragging = true
+    dragStart = input.Position
+    startPos = main.Position
+    input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
+end
+
+main.InputBegan:Connect(inputBeganOnFrame)
+
+UserInputService.InputChanged:Connect(function(input)
+    if not dragging or minimized then return end
+    if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then return end
+    local delta = input.Position - dragStart
+    local view = (workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize) or Vector2.new(1280,720)
+    local mainW = main.AbsoluteSize.X
+    local mainH = main.AbsoluteSize.Y
+    if mainW <= 0 then mainW = 460 end
+    if mainH <= 0 then mainH = 280 end
+    local newX = startPos.X.Offset + delta.X
+    local newY = startPos.Y.Offset + delta.Y
+    newX = math.clamp(newX, 8, view.X - mainW - 8)
+    newY = math.clamp(newY, 8, view.Y - mainH - 8)
+    pcall(function() main.Position = UDim2.new(0, newX, 0, newY) end)
+end)
+
+-- Press K to reopen popup
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == Enum.KeyCode.K then
+        createActivationPopup()
     end
 end)
 
--- Avvio
-task.spawn(function()
-    task.wait(0.5)
-    showNotification("Water Hub Loaded Successfully!", THEME.accent)
-    task.wait(1)
-    showNotification("TikTok: @znfpro4 | YT: OnlyRobloxScript", Color3.fromRGB(100, 200, 255))
-end)
+print("Water Admin Panel v3.4 loaded with jail system.")
